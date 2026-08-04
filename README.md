@@ -1,0 +1,64 @@
+# BrewHelper 🍺⚙️
+*L'expérience native, intelligente et sécurisée pour gérer Homebrew sur macOS.*
+
+![macOS](https://img.shields.io/badge/macOS-14.0+-black?style=for-the-badge&logo=apple) ![Swift](https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift) ![SwiftUI](https://img.shields.io/badge/SwiftUI-100%25-blue?style=for-the-badge&logo=apple) ![Homebrew](https://img.shields.io/badge/Homebrew-Compatible-yellow?style=for-the-badge&logo=homebrew) ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+
+**BrewHelper** est une application macOS native développée en **SwiftUI** qui révolutionne la gestion de votre écosystème **Homebrew**. Fini les lignes de commande répétitives et opaques : pilotez vos installations, maintenez la santé de votre système et auditez la sécurité de vos logiciels dans une interface moderne et fluide.
+
+---
+
+## ✨ Fonctionnalités Principales
+
+### 1. 📦 Gestion Universelle (Formulae & Casks)
+* **Vue d'ensemble intuitive** : Visualisez en temps réel l'ensemble de vos paquets en ligne de commande (*Formulae*) et de vos applications graphiques macOS (*Casks*).
+* **Fiches techniques détaillées** : Accédez au détail de chaque logiciel en un clic — versions locales et distantes, arborescence des dépendances, licences officielles, description et liens directs vers la documentation de l'éditeur.
+* **Détection fine des versions** : Un algorithme scrute localement tous vos répertoires de version (via *Cellar* et *Caskroom*) pour éliminer tout faux positif et vous indiquer avec précision si vous êtes à jour.
+
+### 2. 🛡️ Audit de Sécurité en Temps Réel (CVE / NVD NIST + CPE Matcher)
+* **Scanner de vulnérabilités en arrière-plan** : À l'ouverture, BrewHelper interroge en direct l'API officielle du gouvernement américain (**NVD NIST**) pour tester la résilience de vos paquets face aux failles de sécurité connues.
+* **Filtrage intelligent des Patchs (CPE Engine)** : L'application croise le numéro de votre version installée avec le registre de sécurité *Common Platform Enumeration (CPE)*. Si votre mise à jour intègre déjà le correctif (`versionEndExcluding`), la faille est identifiée comme **déjà patchée** et est exclue de vos alertes. Fini les anciennes failles résolues depuis 2018 !
+* **Code couleur CVSS** : Classification visuelle immédiate des risques de sécurité : Critique (Rouge), Élevée (Orange), Moyenne (Jaune) ou Faible (Bleu).
+
+### 3. 🛍️ Catalogue & App Store Homebrew Intégré
+* **Onglet Découvrir** : Parcourez des sélections sélectionnées par catégorie (Utilitaires de développement, Terminaux Modernes, Sécurité, Éditeurs de texte).
+* **Recherche Mondiale Instantanée** : Tapez n'importe quel mot-clé dans la barre de recherche. L'application interroge la base globale Homebrew et vous propose l'installation en 1-clic des nouveaux outils sans quitter l'interface !
+
+### 4. ⚙️ Maintenance & Mode Silencieux
+* **Zéro interruption visuelle** : Lancez un nettoyage complet (`brew cleanup`), un diagnostic système (`brew doctor`) ou une mise à niveau générale (`brew update & upgrade`). Tout s'exécute silencieusement en arrière-plan via un bandeau de progression animé au sommet de la fenêtre.
+* **Console d'audit à la demande** : Besoin d'inspecter les détails techniques d'une installation ? Ouvrez d'un clic la console de logs en direct au format terminal macOS.
+
+---
+
+## 🔒 Sécurité & Hardening du Code
+
+* **Protection Anti-MITM (Man-in-the-Middle)** : Toutes les exécutions sous-jacentes d'Homebrew intègrent la directive `HOMEBREW_NO_INSECURE_REDIRECT=1`, interdisant toute redite HTTP non chiffrée lors du téléchargement de binaires.
+* **Concurrence Strict (@MainActor)** : Conçu selon l'architecture moderne d'Apple, évitant les collisions et assurant un rendu 120Hz sans ralentissement.
+* **Validation des Requêtes** : Encodage strict et temporisations (timeouts 8s) pour garantir qu'aucune requête dégradée sur le réseau ne bloque votre ordinateur.
+
+---
+
+## 🚀 Installation & Utilisation
+
+### Option 1 : Via l'Installateur macOS (DMG)
+Un fichier d'installation clé en main est généré et prêt à l'emploi :
+1. Téléchargez ou ouvrez `BrewHelper-1.0-Installer.dmg`.
+2. Glissez simplement l'icône **BrewHelper** dans votre dossier *Applications*.
+3. Lancez l'application ! *(Note : nécessite Homebrew accessible sur le Mac sous `/opt/homebrew` ou `/usr/local`)*
+
+### Option 2 : Compilation depuis Apple Xcode
+1. Ouvrez `BrewHelper.xcodeproj` dans **Xcode 15+**.
+2. Sélectionnez la cible `Mac` (ARM64 / Apple Silicon ou Intel x86_64).
+3. Appuyez sur **⌘ R** pour lancer l'application.
+
+---
+
+## 🏗️ Architecture Technique
+
+* **`AppState.swift`** : Chef d'orchestre de l'interface graphique et gestionnaire asynchrone des tâches d'arrière-plan.
+* **`BrewCommandService.swift`** : Pont de communication sécurisé exécutant les processus natifs macOS (`Process`, `Pipe`) avec lecture de flux d'entrées/sorties en continu.
+* **`BrewCatalogService.swift`** : Catalogue de recommandations et moteur de recherche global connectant l'App Store Homebrew en JSON v2.
+* **`CVESecurityService.swift`** : Service réseau asynchrone se connectant aux bases de sécurité NIST avec interprétation du modèle CPE 2.3.
+* **`Views/`** : Interface 100 % SwiftUI modulable avec effets d'animation *macOS Sonoma / Sequoia*.
+
+---
+*Conçu avec passion et rigueur pour les administrateurs systèmes, ingénieurs et amoureux de macOS.* 🍻👨‍💻
