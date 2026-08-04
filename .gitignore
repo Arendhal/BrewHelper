@@ -6,6 +6,23 @@
 *.dmg
 *.zip
 
+# Secrets & credentials — never commit these
+*.env
+.env
+.env.*
+*.pem
+*.p12
+*.p8
+*.cer
+*.mobileprovision
+*.keystore
+*.jks
+*.netrc
+secrets.plist
+Secrets.swift
+GoogleService-Info.plist
+*.xcuserstate
+
 # Xcode build folders and Xcode configuration
 build/
 DerivedData/
