@@ -14,6 +14,7 @@
 		B10000000000000000000005 /* BrewCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* BrewCommandService.swift */; };
 		B10000000000000000000006 /* BrewCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* BrewCatalogService.swift */; };
 		B10000000000000000000007 /* CVESecurityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* CVESecurityService.swift */; };
+		B10000000000000000000098 /* VulnerabilityMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000098 /* VulnerabilityMatcher.swift */; };
 		B10000000000000000000008 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* DesignSystem.swift */; };
 		B10000000000000000000009 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* MainWindowView.swift */; };
 		B10000000000000000000010 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* DashboardView.swift */; };
@@ -32,6 +33,7 @@
 		B20000000000000000000005 /* BrewCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewCommandService.swift; sourceTree = "<group>"; };
 		B20000000000000000000006 /* BrewCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewCatalogService.swift; sourceTree = "<group>"; };
 		B20000000000000000000007 /* CVESecurityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVESecurityService.swift; sourceTree = "<group>"; };
+		B20000000000000000000098 /* VulnerabilityMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VulnerabilityMatcher.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
 		B20000000000000000000010 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
@@ -107,6 +109,7 @@
 				B20000000000000000000005 /* BrewCommandService.swift */,
 				B20000000000000000000006 /* BrewCatalogService.swift */,
 				B20000000000000000000007 /* CVESecurityService.swift */,
+				B20000000000000000000098 /* VulnerabilityMatcher.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -232,6 +235,7 @@
 				B10000000000000000000005 /* BrewCommandService.swift in Sources */,
 				B10000000000000000000006 /* BrewCatalogService.swift in Sources */,
 				B10000000000000000000007 /* CVESecurityService.swift in Sources */,
+				B10000000000000000000098 /* VulnerabilityMatcher.swift in Sources */,
 				B10000000000000000000008 /* DesignSystem.swift in Sources */,
 				B10000000000000000000009 /* MainWindowView.swift in Sources */,
 				B10000000000000000000010 /* DashboardView.swift in Sources */,
@@ -383,7 +387,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminleguen.BrewHelper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
@@ -413,7 +417,7 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
-				MARKETING_VERSION = 1.1;
+				MARKETING_VERSION = 1.2;
 				PRODUCT_BUNDLE_IDENTIFIER = com.benjaminleguen.BrewHelper;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
