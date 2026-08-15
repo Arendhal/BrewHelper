@@ -76,7 +76,7 @@ public struct MainWindowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Divider()
                     HStack {
-                        if appState.isLoading {
+                        if appState.isLoading || appState.isCommandRunning {
                             ProgressView()
                                 .controlSize(.small)
                             Text("Synchronisation...")
@@ -84,7 +84,7 @@ public struct MainWindowView: View {
                                 .foregroundColor(.secondary)
                         } else {
                             Button(action: {
-                                Task { await appState.refreshAll() }
+                                appState.runMaintenance(command: .updateOnly)
                             }) {
                                 HStack(spacing: 6) {
                                     Image(systemName: "arrow.clockwise.circle.fill")
