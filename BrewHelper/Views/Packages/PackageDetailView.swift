@@ -207,7 +207,7 @@ public struct PackageDetailView: View {
                         } else {
                             Button("Forcer une revérification \(CVESecurityService.shared.source.shortLabel)") {
                                 Task {
-                                    await checkSecurity()
+                                    await checkSecurity(force: true)
                                 }
                             }
                             .buttonStyle(.link)
@@ -222,10 +222,10 @@ public struct PackageDetailView: View {
                                     .foregroundColor(.green)
                                     .font(.system(size: 24))
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text("Aucun signalement CVE majeur détecté.")
+                                    Text("Aucune faille non corrigée pour la version installée.")
                                         .font(.system(size: 14, weight: .semibold))
                                         .foregroundColor(.green)
-                                    Text("L'audit en temps réel de la base \(CVESecurityService.shared.source.fullDescription) n'a relevé aucune faille de sécurité critique pour \(package.name).")
+                                    Text("L'audit de la base \(CVESecurityService.shared.source.fullDescription) n'a relevé aucune CVE ouverte pour \(package.name) v\(package.installedVersion). Les CVE déjà corrigées par cette version ne sont pas listées.")
                                         .font(DesignSystem.Typography.body)
                                         .foregroundColor(.secondary)
                                 }
@@ -234,6 +234,11 @@ public struct PackageDetailView: View {
                         }
                     } else {
                         VStack(spacing: 12) {
+                            Text("\(vulnerabilities.count) faille(s) encore ouverte(s) sur la version installée (v\(package.installedVersion)), de la plus récente à la plus ancienne. Les CVE corrigées par cette version sont masquées.")
+                                .font(DesignSystem.Typography.body)
+                                .foregroundColor(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
                             ForEach(vulnerabilities) { vuln in
                                 GlassCard {
                                     VStack(alignment: .leading, spacing: 8) {
@@ -248,6 +253,20 @@ public struct PackageDetailView: View {
                                                 .font(DesignSystem.Typography.monospace)
                                                 .foregroundColor(.secondary)
                                         }
+
+                                        // Patch cross-check: why this CVE is still considered open here.
+                                        HStack(spacing: 8) {
+                                            if vuln.isConfirmedAffected {
+                                                StatusBadge(text: vuln.verdict.localizedLabel, color: .red, icon: "xmark.shield.fill")
+                                            } else {
+                                                StatusBadge(text: vuln.verdict.localizedLabel, color: .gray, icon: "questionmark.circle.fill")
+                                            }
+                                            if let range = vuln.affectedRangeSummary {
+                                                StatusBadge(text: "Versions affectées : \(range)", color: .secondary)
+                                            }
+                                            Spacer()
+                                        }
+
                                         Text(vuln.description)
                                             .font(DesignSystem.Typography.body)
                                             .foregroundColor(.primary)
@@ -286,7 +305,7 @@ public struct PackageDetailView: View {
     }
     
     private func loadCachedOrFetchSecurity() async {
-        if let cached = CVESecurityService.shared.packageVulnerabilities[package.name] {
+        if let cached = CVESecurityService.shared.cachedVulnerabilities(for: package) {
             DispatchQueue.main.async {
                 self.vulnerabilities = cached
             }
@@ -295,11 +314,11 @@ public struct PackageDetailView: View {
         }
     }
     
-    private func checkSecurity() async {
+    private func checkSecurity(force: Bool = false) async {
         DispatchQueue.main.async {
             isCheckingSecurityNow = true
         }
-        let results = await CVESecurityService.shared.checkSinglePackageNow(package: package)
+        let results = await CVESecurityService.shared.checkSinglePackageNow(package: package, force: force)
         DispatchQueue.main.async {
             self.vulnerabilities = results
             isCheckingSecurityNow = false
