@@ -1,7 +1,7 @@
 # BrewHelper 🍺⚙️
 *L'expérience native, intelligente et sécurisée pour gérer Homebrew sur macOS.*
 
-![macOS](https://img.shields.io/badge/macOS-14.0+-black?style=for-the-badge&logo=apple) ![Swift](https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift) ![SwiftUI](https://img.shields.io/badge/SwiftUI-100%25-blue?style=for-the-badge&logo=apple) ![Homebrew](https://img.shields.io/badge/Homebrew-Compatible-yellow?style=for-the-badge&logo=homebrew) ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
+![macOS](https://img.shields.io/badge/macOS-14.0+-black?style=for-the-badge&logo=apple) ![Universal](https://img.shields.io/badge/Universal-Apple%20Silicon%20%2B%20Intel-lightgrey?style=for-the-badge&logo=apple) ![Swift](https://img.shields.io/badge/Swift-5.9-orange?style=for-the-badge&logo=swift) ![SwiftUI](https://img.shields.io/badge/SwiftUI-100%25-blue?style=for-the-badge&logo=apple) ![Homebrew](https://img.shields.io/badge/Homebrew-Compatible-yellow?style=for-the-badge&logo=homebrew) ![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)
 
 **BrewHelper** est une application macOS native développée en **SwiftUI** qui révolutionne la gestion de votre écosystème **Homebrew**. Fini les lignes de commande répétitives et opaques : pilotez vos installations, maintenez la santé de votre système et auditez la sécurité de vos logiciels dans une interface moderne et fluide.
 
@@ -50,16 +50,35 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 
 ## 🚀 Installation & Utilisation
 
+**Prérequis** : macOS 14 (Sonoma) ou ultérieur, et Homebrew installé sous `/opt/homebrew`
+(Apple Silicon) ou `/usr/local` (Intel).
+
 ### Option 1 : Via l'Installateur macOS (DMG)
-Un fichier d'installation clé en main est généré et prêt à l'emploi :
-1. Téléchargez ou ouvrez `BrewHelper-1.3-Installer.dmg`.
-2. Glissez simplement l'icône **BrewHelper** dans votre dossier *Applications*.
-3. Lancez l'application ! *(Note : nécessite Homebrew accessible sur le Mac sous `/opt/homebrew` ou `/usr/local`)*
+L'installateur publié avec chaque version contient un **binaire universel**, exécutable
+nativement sur Apple Silicon comme sur Intel :
+1. Téléchargez `BrewHelper-1.3-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
+2. Ouvrez-le et glissez l'icône **BrewHelper** dans votre dossier *Applications*.
+3. Lancez l'application.
+
+*L'application est signée localement (signature ad hoc) et non notarisée : au premier
+lancement, macOS demande une confirmation via **Réglages Système → Confidentialité et
+sécurité → Ouvrir quand même**.*
 
 ### Option 2 : Compilation depuis Apple Xcode
 1. Ouvrez `BrewHelper.xcodeproj` dans **Xcode 15+**.
-2. Sélectionnez la cible `Mac` (ARM64 / Apple Silicon ou Intel x86_64).
-3. Appuyez sur **⌘ R** pour lancer l'application.
+2. Appuyez sur **⌘ R** pour lancer l'application.
+
+La configuration *Release* compile pour les deux architectures (`ARCHS = arm64 x86_64`).
+Pour produire l'installateur universel en ligne de commande, la destination générique est
+nécessaire — sans elle, `xcodebuild` ne compile que l'architecture de la machine hôte :
+
+```sh
+xcodebuild -project BrewHelper.xcodeproj -scheme BrewHelper \
+           -configuration Release -destination 'generic/platform=macOS' \
+           -derivedDataPath build clean build
+lipo -archs build/Build/Products/Release/BrewHelper.app/Contents/MacOS/BrewHelper
+# → x86_64 arm64
+```
 
 ---
 

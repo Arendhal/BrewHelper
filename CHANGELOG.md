@@ -109,7 +109,11 @@ icônes du Dock.
 - `CVESecurityService` est réécrit autour de l'orchestration (parallélisme, quotas,
   reprises, cache disque) ; l'interrogation des bases est isolée dans un
   `VulnerabilityFetcher` détaché de l'acteur principal.
-- Le binaire livré est `arm64` (identique à la 1.2). macOS 14 ou ultérieur.
+- L'installateur livre un **binaire universel** (`arm64` + `x86_64`). macOS 14 ou
+  ultérieur. La configuration *Release* visait déjà les deux architectures, mais
+  l'empaquetage en ligne de commande ne produisait que celle de la machine hôte faute de
+  destination générique — les installateurs 1.0 à 1.2 étaient `arm64` seul, alors que le
+  projet annonçait la compatibilité Intel.
 
 ---
 
