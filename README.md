@@ -52,7 +52,7 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 
 ### Option 1 : Via l'Installateur macOS (DMG)
 Un fichier d'installation clé en main est généré et prêt à l'emploi :
-1. Téléchargez ou ouvrez `BrewHelper-1.0-Installer.dmg`.
+1. Téléchargez ou ouvrez `BrewHelper-1.3-Installer.dmg`.
 2. Glissez simplement l'icône **BrewHelper** dans votre dossier *Applications*.
 3. Lancez l'application ! *(Note : nécessite Homebrew accessible sur le Mac sous `/opt/homebrew` ou `/usr/local`)*
 
@@ -73,6 +73,10 @@ Un fichier d'installation clé en main est généré et prêt à l'emploi :
 * **`ThreatIntelService.swift`** : Catalogue CISA KEV et scores EPSS, qui déterminent l'ordre de traitement des failles.
 * **`RemediationService.swift`** : Construction du plan de remédiation à partir de `versioned_formulae`, `deprecated`/`disabled` et `brew uses --installed`.
 * **`Views/`** : Interface 100 % SwiftUI modulable avec effets d'animation *macOS Sonoma / Sequoia*.
+
+## 📋 Journal des versions
+
+Les évolutions de chaque version sont détaillées dans [`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 *Conçu avec passion et rigueur pour les administrateurs systèmes, ingénieurs et amoureux de macOS.* 🍻👨‍💻
