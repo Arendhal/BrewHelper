@@ -14,6 +14,10 @@
 		B10000000000000000000005 /* BrewCommandService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000005 /* BrewCommandService.swift */; };
 		B10000000000000000000006 /* BrewCatalogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000006 /* BrewCatalogService.swift */; };
 		B10000000000000000000007 /* CVESecurityService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000007 /* CVESecurityService.swift */; };
+		B10000000000000000000101 /* RemediationPlan.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000101 /* RemediationPlan.swift */; };
+		B10000000000000000000102 /* RemediationService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000102 /* RemediationService.swift */; };
+		B10000000000000000000103 /* ThreatIntelService.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000103 /* ThreatIntelService.swift */; };
+		B10000000000000000000104 /* SecurityAuditView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000104 /* SecurityAuditView.swift */; };
 		B10000000000000000000098 /* VulnerabilityMatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000098 /* VulnerabilityMatcher.swift */; };
 		B10000000000000000000008 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* DesignSystem.swift */; };
 		B10000000000000000000009 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* MainWindowView.swift */; };
@@ -33,6 +37,10 @@
 		B20000000000000000000005 /* BrewCommandService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewCommandService.swift; sourceTree = "<group>"; };
 		B20000000000000000000006 /* BrewCatalogService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewCatalogService.swift; sourceTree = "<group>"; };
 		B20000000000000000000007 /* CVESecurityService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CVESecurityService.swift; sourceTree = "<group>"; };
+		B20000000000000000000101 /* RemediationPlan.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemediationPlan.swift; sourceTree = "<group>"; };
+		B20000000000000000000102 /* RemediationService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemediationService.swift; sourceTree = "<group>"; };
+		B20000000000000000000103 /* ThreatIntelService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ThreatIntelService.swift; sourceTree = "<group>"; };
+		B20000000000000000000104 /* SecurityAuditView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SecurityAuditView.swift; sourceTree = "<group>"; };
 		B20000000000000000000098 /* VulnerabilityMatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VulnerabilityMatcher.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
@@ -99,6 +107,7 @@
 			children = (
 				B20000000000000000000003 /* BrewPackage.swift */,
 				B20000000000000000000004 /* CVEVulnerability.swift */,
+				B20000000000000000000101 /* RemediationPlan.swift */,
 			);
 			path = Models;
 			sourceTree = "<group>";
@@ -110,6 +119,8 @@
 				B20000000000000000000006 /* BrewCatalogService.swift */,
 				B20000000000000000000007 /* CVESecurityService.swift */,
 				B20000000000000000000098 /* VulnerabilityMatcher.swift */,
+				B20000000000000000000102 /* RemediationService.swift */,
+				B20000000000000000000103 /* ThreatIntelService.swift */,
 			);
 			path = Services;
 			sourceTree = "<group>";
@@ -128,9 +139,18 @@
 				B20000000000000000000009 /* MainWindowView.swift */,
 				B40000000000000000000015 /* Dashboard */,
 				B40000000000000000000016 /* Packages */,
+				B40000000000000000000018 /* Security */,
 				B40000000000000000000017 /* Maintenance */,
 			);
 			path = Views;
+			sourceTree = "<group>";
+		};
+		B40000000000000000000018 /* Security */ = {
+			isa = PBXGroup;
+			children = (
+				B20000000000000000000104 /* SecurityAuditView.swift */,
+			);
+			path = Security;
 			sourceTree = "<group>";
 		};
 		B40000000000000000000015 /* Dashboard */ = {
@@ -236,6 +256,10 @@
 				B10000000000000000000006 /* BrewCatalogService.swift in Sources */,
 				B10000000000000000000007 /* CVESecurityService.swift in Sources */,
 				B10000000000000000000098 /* VulnerabilityMatcher.swift in Sources */,
+				B10000000000000000000101 /* RemediationPlan.swift in Sources */,
+				B10000000000000000000102 /* RemediationService.swift in Sources */,
+				B10000000000000000000103 /* ThreatIntelService.swift in Sources */,
+				B10000000000000000000104 /* SecurityAuditView.swift in Sources */,
 				B10000000000000000000008 /* DesignSystem.swift in Sources */,
 				B10000000000000000000009 /* MainWindowView.swift in Sources */,
 				B10000000000000000000010 /* DashboardView.swift in Sources */,

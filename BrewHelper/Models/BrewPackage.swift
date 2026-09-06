@@ -1,6 +1,6 @@
 import Foundation
 
-public struct BrewPackage: Identifiable, Hashable {
+public struct BrewPackage: Identifiable, Hashable, Sendable {
     public let id: String
     public let name: String
     public let fullName: String
@@ -49,15 +49,18 @@ public struct BrewPackage: Identifiable, Hashable {
     }
 }
 
-public enum PackageType: String, CaseIterable, Codable, Hashable {
+public enum PackageType: String, CaseIterable, Codable, Hashable, Sendable {
     case formula = "formula"
     case cask = "cask"
 }
 
-public enum PackageCVEStatus: Hashable {
+public enum PackageCVEStatus: Hashable, Sendable {
     case unscanned
     case scanning
     case clean
+    /// La base interrogée ne connaît pas ce produit : un badge vert serait mensonger,
+    /// l'absence de résultat ne prouve rien pour un paquet qu'elle ne suit pas.
+    case notTracked
     case vulnerable(cveCount: Int, highestSeverity: CVESeverity)
     case error(String)
 }

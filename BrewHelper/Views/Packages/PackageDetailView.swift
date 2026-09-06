@@ -5,8 +5,6 @@ public struct PackageDetailView: View {
     @Environment(\.openURL) var openURL
     
     let package: BrewPackage
-    @State private var vulnerabilities: [CVEVulnerability] = []
-    @State private var isCheckingSecurityNow: Bool = false
     
     public init(package: BrewPackage) {
         self.package = package
@@ -191,137 +189,191 @@ public struct PackageDetailView: View {
                     }
                 }
                 
-                // Security CVE Section (source dynamique : NVD/NIST ou EUVD/ENISA)
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "lock.shield.fill")
-                            .foregroundColor(vulnerabilities.isEmpty ? .green : .red)
-                        Text("Audit de Sécurité & Failles CVE (\(CVESecurityService.shared.source.shortLabel))")
-                            .font(DesignSystem.Typography.sectionHeader)
-                        Spacer()
-                        if isCheckingSecurityNow {
-                            ProgressView().controlSize(.small)
-                            Text("Recherche en cours...")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Button("Forcer une revérification \(CVESecurityService.shared.source.shortLabel)") {
-                                Task {
-                                    await checkSecurity(force: true)
-                                }
-                            }
-                            .buttonStyle(.link)
-                            .font(.system(size: 12, weight: .semibold))
-                        }
-                    }
-
-                    if vulnerabilities.isEmpty {
-                        GlassCard {
-                            HStack(spacing: 12) {
-                                Image(systemName: "checkmark.shield.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 24))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text("Aucune faille non corrigée pour la version installée.")
-                                        .font(.system(size: 14, weight: .semibold))
-                                        .foregroundColor(.green)
-                                    Text("L'audit de la base \(CVESecurityService.shared.source.fullDescription) n'a relevé aucune CVE ouverte pour \(package.name) v\(package.installedVersion). Les CVE déjà corrigées par cette version ne sont pas listées.")
-                                        .font(DesignSystem.Typography.body)
-                                        .foregroundColor(.secondary)
-                                }
-                                Spacer()
-                            }
-                        }
-                    } else {
-                        VStack(spacing: 12) {
-                            Text("\(vulnerabilities.count) faille(s) encore ouverte(s) sur la version installée (v\(package.installedVersion)), de la plus récente à la plus ancienne. Les CVE corrigées par cette version sont masquées.")
-                                .font(DesignSystem.Typography.body)
-                                .foregroundColor(.secondary)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            ForEach(vulnerabilities) { vuln in
-                                GlassCard {
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        HStack {
-                                            StatusBadge(text: vuln.id, color: vuln.severity.color, icon: "exclamationmark.triangle.fill")
-                                            StatusBadge(text: "Sévérité : \(vuln.severity.localizedLabel)", color: vuln.severity.color)
-                                            if let score = vuln.cvssScore {
-                                                StatusBadge(text: "CVSS : \(String(format: "%.1f", score))", color: vuln.severity.color)
-                                            }
-                                            Spacer()
-                                            Text("Publié le : \(vuln.publishedDate)")
-                                                .font(DesignSystem.Typography.monospace)
-                                                .foregroundColor(.secondary)
-                                        }
-
-                                        // Patch cross-check: why this CVE is still considered open here.
-                                        HStack(spacing: 8) {
-                                            if vuln.isConfirmedAffected {
-                                                StatusBadge(text: vuln.verdict.localizedLabel, color: .red, icon: "xmark.shield.fill")
-                                            } else {
-                                                StatusBadge(text: vuln.verdict.localizedLabel, color: .gray, icon: "questionmark.circle.fill")
-                                            }
-                                            if let range = vuln.affectedRangeSummary {
-                                                StatusBadge(text: "Versions affectées : \(range)", color: .secondary)
-                                            }
-                                            Spacer()
-                                        }
-
-                                        Text(vuln.description)
-                                            .font(DesignSystem.Typography.body)
-                                            .foregroundColor(.primary)
-                                            .fixedSize(horizontal: false, vertical: true)
-                                        HStack {
-                                            Spacer()
-                                            Button("Consulter le rapport officiel \(vuln.sourceLabel) →") {
-                                                if let ref = vuln.referenceURL, let url = URL(string: ref) {
-                                                    openURL(url)
-                                                }
-                                            }
-                                            .buttonStyle(.link)
-                                            .font(.system(size: 12, weight: .bold))
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
+                PackageSecuritySection(package: package)
                 
                 Spacer()
             }
             .padding(28)
         }
-        .onAppear {
-            Task {
-                await loadCachedOrFetchSecurity()
+    }
+}
+
+
+// MARK: - Section sécurité de la fiche paquet
+//
+// Rien n'est interrogé à l'ouverture de la fiche : on montre le verdict du dernier audit,
+// et l'analyse d'un paquet isolé reste une action explicite.
+struct PackageSecuritySection: View {
+    @EnvironmentObject var appState: AppState
+    @ObservedObject private var security: CVESecurityService = .shared
+
+    let package: BrewPackage
+    @State private var isChecking: Bool = false
+
+    private var vulnerabilities: [CVEVulnerability] {
+        security.cachedVulnerabilities(for: package) ?? []
+    }
+
+    private var hasVerdict: Bool {
+        security.cachedVulnerabilities(for: package) != nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            header
+
+            if let failure = security.scanFailures[package.name] {
+                verdictCard(icon: "wifi.exclamationmark", color: .red,
+                            title: "Vérification impossible",
+                            message: "\(failure). Ce paquet n'a pas été comparé aux avis de sécurité : son état est inconnu, pas sain.")
+            } else if !hasVerdict {
+                verdictCard(icon: "circle.dashed", color: .secondary,
+                            title: "Paquet non audité",
+                            message: "Aucun verdict en mémoire pour la v\(package.installedVersion). Lancez l'analyse pour comparer cette version aux avis publiés.")
+            } else if security.untrackedPackages.contains(package.name) {
+                verdictCard(icon: "questionmark.circle.fill", color: .secondary,
+                            title: "Produit absent de la base \(security.source.shortLabel)",
+                            message: "La base interrogée ne suit pas ce logiciel : l'absence de résultat n'y prouve rien. Essayez l'autre base depuis l'onglet Audit de Sécurité.")
+            } else if vulnerabilities.isEmpty {
+                verdictCard(icon: "checkmark.shield.fill", color: .green,
+                            title: "Aucune faille non corrigée pour la version installée",
+                            message: "L'audit \(security.source.fullDescription) n'a relevé aucune CVE encore ouverte pour \(package.name) v\(package.installedVersion). Les failles déjà corrigées par cette version ne sont pas listées.")
+            } else {
+                vulnerabilityList
             }
-        }
-        .onChange(of: package.id) {
-            Task {
-                await loadCachedOrFetchSecurity()
+
+            if !vulnerabilities.isEmpty {
+                RemediationPlanCard(package: package, vulnerabilities: vulnerabilities)
             }
         }
     }
-    
-    private func loadCachedOrFetchSecurity() async {
-        if let cached = CVESecurityService.shared.cachedVulnerabilities(for: package) {
-            DispatchQueue.main.async {
-                self.vulnerabilities = cached
+
+    private var header: some View {
+        HStack {
+            Image(systemName: "lock.shield.fill")
+                .foregroundColor(vulnerabilities.isEmpty ? .green : .red)
+            Text("Audit de Sécurité & Failles CVE (\(security.source.shortLabel))")
+                .font(DesignSystem.Typography.sectionHeader)
+            Spacer()
+            if isChecking {
+                ProgressView().controlSize(.small)
+                Text("Interrogation de \(security.source.shortLabel)...")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            } else {
+                Button(hasVerdict ? "Revérifier ce paquet" : "Analyser ce paquet") {
+                    Task {
+                        isChecking = true
+                        _ = await security.checkSinglePackageNow(package: package, force: true)
+                        isChecking = false
+                    }
+                }
+                .buttonStyle(.link)
+                .font(.system(size: 12, weight: .semibold))
             }
-        } else {
-            await checkSecurity()
         }
     }
-    
-    private func checkSecurity(force: Bool = false) async {
-        DispatchQueue.main.async {
-            isCheckingSecurityNow = true
+
+    private func verdictCard(icon: String, color: Color, title: String, message: String) -> some View {
+        GlassCard {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: icon)
+                    .foregroundColor(color)
+                    .font(.system(size: 24))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(color == .secondary ? .primary : color)
+                    Text(message)
+                        .font(DesignSystem.Typography.body)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+            }
         }
-        let results = await CVESecurityService.shared.checkSinglePackageNow(package: package, force: force)
-        DispatchQueue.main.async {
-            self.vulnerabilities = results
-            isCheckingSecurityNow = false
+    }
+
+    private var vulnerabilityList: some View {
+        VStack(spacing: 12) {
+            Text("\(vulnerabilities.count) faille(s) encore ouverte(s) sur la v\(package.installedVersion), classées par urgence réelle : l'exploitation avérée prime sur le score.")
+                .font(DesignSystem.Typography.body)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+            ForEach(vulnerabilities) { vulnerability in
+                VulnerabilityCard(vulnerability: vulnerability)
+            }
+        }
+    }
+}
+
+/// Une faille, avec ce qui permet de décider s'il faut agir aujourd'hui.
+struct VulnerabilityCard: View {
+    @Environment(\.openURL) var openURL
+    let vulnerability: CVEVulnerability
+
+    var body: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    StatusBadge(text: vulnerability.id, color: vulnerability.severity.color, icon: "exclamationmark.triangle.fill")
+                    StatusBadge(text: "Sévérité : \(vulnerability.severity.localizedLabel)", color: vulnerability.severity.color)
+                    if let score = vulnerability.cvssScore {
+                        StatusBadge(text: "CVSS : \(String(format: "%.1f", score))", color: vulnerability.severity.color)
+                    }
+                    Spacer()
+                    Text("Publié le : \(vulnerability.publishedDate)")
+                        .font(DesignSystem.Typography.monospace)
+                        .foregroundColor(.secondary)
+                }
+
+                // Renseignement d'exploitation : ce qui distingue une faille théorique
+                // d'une faille dont on se sert aujourd'hui.
+                if vulnerability.isKnownExploited || vulnerability.epssScore != nil {
+                    HStack(spacing: 8) {
+                        if vulnerability.isKnownExploited {
+                            StatusBadge(text: "Exploitation avérée (CISA KEV)", color: .red, icon: "flame.fill")
+                        }
+                        if vulnerability.usedByRansomware {
+                            StatusBadge(text: "Employée par des rançongiciels", color: .red, icon: "lock.trianglebadge.exclamationmark.fill")
+                        }
+                        if let epss = vulnerability.epssLabel {
+                            StatusBadge(text: "\(epss) de risque d'exploitation à 30 j",
+                                        color: (vulnerability.epssScore ?? 0) > 0.1 ? .orange : .secondary,
+                                        icon: "chart.line.uptrend.xyaxis")
+                        }
+                        Spacer()
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    if vulnerability.isConfirmedAffected {
+                        StatusBadge(text: vulnerability.verdict.localizedLabel, color: .red, icon: "xmark.shield.fill")
+                    } else {
+                        StatusBadge(text: vulnerability.verdict.localizedLabel, color: .gray, icon: "questionmark.circle.fill")
+                    }
+                    if let range = vulnerability.affectedRangeSummary {
+                        StatusBadge(text: "Versions affectées : \(range)", color: .secondary)
+                    }
+                    Spacer()
+                }
+
+                Text(vulnerability.description)
+                    .font(DesignSystem.Typography.body)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Spacer()
+                    Button("Consulter le rapport officiel \(vulnerability.sourceLabel) →") {
+                        if let reference = vulnerability.referenceURL, let url = URL(string: reference) {
+                            openURL(url)
+                        }
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 12, weight: .bold))
+                }
+            }
         }
     }
 }

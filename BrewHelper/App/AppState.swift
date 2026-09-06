@@ -45,12 +45,15 @@ public class AppState: ObservableObject {
     // Background Silent Operation State (Progress Banner)
     @Published public var activeOperationMessage: String? = nil
     @Published public var activeOperationDetail: String? = nil
+    /// Actualisation du catalogue Homebrew au lancement. Distincte de `isCommandRunning`
+    /// pour ne pas verrouiller les actions de l'interface pendant cette synchronisation.
+    @Published public var isSyncingCatalog: Bool = false
     
     private var hasLoadedOnce: Bool = false
     
     public init() {
         Task {
-            await self.onAppearInitialLoad()
+            self.onAppearInitialLoad()
         }
     }
     
@@ -61,6 +64,51 @@ public class AppState: ObservableObject {
         Task {
             await loadCatalog()
             await refreshAll()
+            await synchronizeCatalog()
+        }
+    }
+    
+    /// Ce que fait le lancement : actualiser les index Homebrew. C'est cette étape qui
+    /// rend fiable l'état « mises à jour disponibles », et elle est locale et rapide.
+    /// L'audit de vulnérabilités, lui, interroge une base distante paquet par paquet :
+    /// il se déclenche à la demande depuis l'onglet Audit de Sécurité.
+    public func synchronizeCatalog() async {
+        guard !isSyncingCatalog else { return }
+        isSyncingCatalog = true
+        activeOperationMessage = "🔄 Actualisation du catalogue Homebrew..."
+        activeOperationDetail = "brew update"
+        
+        do {
+            let code = try await BrewCommandService.shared.runCommandWithStreaming(arguments: ["update"]) { [weak self] line in
+                self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            activeOperationMessage = code == 0
+                ? "✅ Catalogue Homebrew à jour."
+                : "⚠️ Actualisation du catalogue terminée (code \(code))."
+        } catch {
+            activeOperationMessage = "⚠️ Catalogue non actualisé : \(error.localizedDescription)"
+        }
+        
+        activeOperationDetail = nil
+        isSyncingCatalog = false
+        await refreshAll()
+        
+        try? await Task.sleep(nanoseconds: 3_000_000_000)
+        if !isCommandRunning && !isSyncingCatalog {
+            activeOperationMessage = nil
+        }
+    }
+    
+    /// Lance l'audit de vulnérabilités sur les paquets installés. Toujours déclenché par
+    /// une action explicite.
+    public func runSecurityAudit(force: Bool = false) {
+        CVESecurityService.shared.startAudit(for: packages, force: force) { [weak self] pkgId, newStatus in
+            guard let self = self else { return }
+            if let index = self.packages.firstIndex(where: { $0.id == pkgId }) {
+                var modified = self.packages[index]
+                modified.cveStatus = newStatus
+                self.packages[index] = modified
+            }
         }
     }
     
@@ -82,13 +130,9 @@ public class AppState: ObservableObject {
             self.packages = fetched
             self.isLoading = false
             
-            CVESecurityService.shared.startBackgroundScan(for: fetched) { [weak self] pkgId, newStatus in
-                guard let self = self else { return }
-                if let index = self.packages.firstIndex(where: { $0.id == pkgId }) {
-                    var modified = self.packages[index]
-                    modified.cveStatus = newStatus
-                    self.packages[index] = modified
-                }
+            // Statuts issus du dernier audit mémorisé : rien n'est interrogé ici.
+            for index in self.packages.indices {
+                self.packages[index].cveStatus = CVESecurityService.shared.status(for: self.packages[index])
             }
             
             Task {
@@ -140,19 +184,8 @@ public class AppState: ObservableObject {
         case .casks: base = packages.filter { $0.type == .cask }
         case .outdated: base = packages.filter { $0.isOutdated }
         case .securityAudit:
-            base = packages.sorted { p1, p2 in
-                let w1: Int = {
-                    if case .vulnerable = p1.cveStatus { return 3 }
-                    if case .scanning = p1.cveStatus { return 2 }
-                    return 1
-                }()
-                let w2: Int = {
-                    if case .vulnerable = p2.cveStatus { return 3 }
-                    if case .scanning = p2.cveStatus { return 2 }
-                    return 1
-                }()
-                return w1 > w2
-            }
+            // Classement par risque réel : l'exploitation avérée prime sur le score.
+            base = packages.sorted { CVESecurityService.shared.riskScore(for: $0) > CVESecurityService.shared.riskScore(for: $1) }
         }
         
         if search.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -225,6 +258,49 @@ public class AppState: ObservableObject {
             await refreshAll()
             
             // Auto-hide success banner after 3.5 seconds
+            try? await Task.sleep(nanoseconds: 3_500_000_000)
+            if !self.isCommandRunning {
+                self.activeOperationMessage = nil
+            }
+        }
+    }
+    
+    /// Exécute une étape d'un plan de remédiation. Même canal que les autres commandes :
+    /// bandeau de progression, console consultable, rafraîchissement à la fin.
+    public func runRemediationStep(_ step: RemediationStep) {
+        guard let arguments = step.command else { return }
+        runBrewArguments(arguments, title: step.title)
+    }
+    
+    public func runBrewArguments(_ arguments: [String], title: String) {
+        terminalTitle = title.uppercased()
+        terminalLogs = ["🚀 brew \(arguments.joined(separator: " "))", "--------------------------------------------------"]
+        
+        isCommandRunning = true
+        activeOperationMessage = "⚙️ \(title)..."
+        activeOperationDetail = "brew \(arguments.joined(separator: " "))"
+        
+        Task {
+            do {
+                let code = try await BrewCommandService.shared.runCommandWithStreaming(arguments: arguments) { [weak self] line in
+                    self?.terminalLogs.append(line)
+                    self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
+                }
+                terminalLogs.append("--------------------------------------------------")
+                let ok = (code == 0)
+                terminalLogs.append(ok ? "✅ Terminé avec succès (Code 0)." : "⚠️ Terminé avec le code \(code).")
+                activeOperationMessage = ok ? "✅ \(title) : terminé." : "⚠️ \(title) : code \(code)"
+            } catch {
+                terminalLogs.append("❌ Erreur : \(error.localizedDescription)")
+                activeOperationMessage = "❌ \(title) : \(error.localizedDescription)"
+            }
+            activeOperationDetail = nil
+            isCommandRunning = false
+            // Les versions installées ont changé : les plans et les verdicts calculés
+            // contre l'ancienne version ne valent plus rien.
+            RemediationService.shared.invalidate()
+            await refreshAll()
+            
             try? await Task.sleep(nanoseconds: 3_500_000_000)
             if !self.isCommandRunning {
                 self.activeOperationMessage = nil

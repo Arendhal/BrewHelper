@@ -76,7 +76,7 @@ public struct MainWindowView: View {
                 VStack(alignment: .leading, spacing: 8) {
                     Divider()
                     HStack {
-                        if appState.isLoading || appState.isCommandRunning {
+                        if appState.isLoading || appState.isCommandRunning || appState.isSyncingCatalog {
                             ProgressView()
                                 .controlSize(.small)
                             Text("Synchronisation...")
@@ -110,7 +110,7 @@ public struct MainWindowView: View {
                 if let msg = appState.activeOperationMessage {
                     VStack(spacing: 6) {
                         HStack(spacing: 12) {
-                            if appState.isCommandRunning {
+                            if appState.isCommandRunning || appState.isSyncingCatalog {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -141,7 +141,7 @@ public struct MainWindowView: View {
                             .controlSize(.small)
                             .tint(.blue)
                         }
-                        if appState.isCommandRunning {
+                        if appState.isCommandRunning || appState.isSyncingCatalog {
                             ProgressView()
                                 .progressViewStyle(.linear)
                                 .tint(.blue)
@@ -164,6 +164,8 @@ public struct MainWindowView: View {
                         DashboardView()
                     } else if appState.selectedTab == .discover {
                         DiscoverCatalogView()
+                    } else if appState.selectedTab == .securityAudit {
+                        SecurityAuditView()
                     } else {
                         PackageListView(currentTab: appState.selectedTab)
                     }

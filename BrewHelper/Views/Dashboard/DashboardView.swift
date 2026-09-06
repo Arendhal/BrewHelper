@@ -118,66 +118,8 @@ public struct DashboardView: View {
                     }
                 }
                 
-                // Live Background Security Scanner Widget
-                GlassCard {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "lock.shield.fill")
-                                .foregroundColor(securityService.vulnerableCount > 0 ? .orange : .green)
-                                .font(.system(size: 20))
-                            Text("Audit de Sécurité en arrière-plan")
-                                .font(DesignSystem.Typography.sectionHeader)
-                            Spacer()
-                            HStack(spacing: 8) {
-                                Text("Base de données :")
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(.secondary)
-                                Picker("", selection: Binding(
-                                    get: { securityService.source },
-                                    set: { newSource in
-                                        securityService.switchSource(to: newSource, packages: appState.packages) { pkgId, newStatus in
-                                            if let index = appState.packages.firstIndex(where: { $0.id == pkgId }) {
-                                                var modified = appState.packages[index]
-                                                modified.cveStatus = newStatus
-                                                appState.packages[index] = modified
-                                            }
-                                        }
-                                    }
-                                )) {
-                                    ForEach(VulnDatabaseSource.allCases) { src in
-                                        Text(src.shortLabel).tag(src)
-                                    }
-                                }
-                                .labelsHidden()
-                                .pickerStyle(.segmented)
-                                .frame(width: 140)
-                                .disabled(securityService.isScanning)
-                            }
-
-                            if securityService.isScanning {
-                                ProgressView()
-                                    .controlSize(.small)
-                                Text("Analyse : \(securityService.currentPackageScanned)")
-                                    .font(DesignSystem.Typography.monospace)
-                                    .foregroundColor(.secondary)
-                            } else {
-                                StatusBadge(text: "Audit à jour (\(securityService.scannedCount) vérifiés)", color: .green, icon: "checkmark.shield.fill")
-                            }
-                        }
-                        
-                        if securityService.totalToScan > 0 && securityService.isScanning {
-                            ProgressView(value: Double(securityService.scannedCount), total: Double(securityService.totalToScan))
-                                .tint(.green)
-                        }
-                        
-                        Text(securityService.vulnerableCount == 0 ?
-                             "Aucune faille de sécurité majeure (CVE) détectée parmi vos paquets Homebrew actifs (source : \(securityService.source.fullDescription))." :
-                             "⚠️ \(securityService.vulnerableCount) paquet(s) affichent des alertes de vulnérabilité répertoriées dans la base \(securityService.source.fullDescription). Consultez l'onglet Audit de Sécurité.")
-                            .font(DesignSystem.Typography.body)
-                            .foregroundColor(securityService.vulnerableCount > 0 ? .orange : .secondary)
-                    }
-                    .padding(4)
-                }
+                // Audit de sécurité : déclenché à la main, jamais au lancement.
+                SecurityAuditSummaryCard()
                 
                 // Maintenance Hub Section
                 VStack(alignment: .leading, spacing: 16) {
@@ -377,5 +319,116 @@ struct CatalogCardView: View {
         .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
         .cornerRadius(12)
         .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.1), lineWidth: 1))
+    }
+}
+
+
+// MARK: - Récapitulatif de l'audit sur la vue d'ensemble
+//
+// L'audit n'est plus lancé au démarrage : la vue d'ensemble en montre l'état et propose
+// de le déclencher, plutôt que d'afficher une analyse qui part toute seule.
+struct SecurityAuditSummaryCard: View {
+    @EnvironmentObject var appState: AppState
+    @ObservedObject private var security: CVESecurityService = .shared
+
+    private static let dateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter
+    }()
+
+    var body: some View {
+        GlassCard {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: iconName)
+                        .foregroundColor(accentColor)
+                        .font(.system(size: 20))
+                    Text("Audit de Sécurité")
+                        .font(DesignSystem.Typography.sectionHeader)
+
+                    Spacer()
+
+                    if security.isScanning {
+                        ProgressView().controlSize(.small)
+                        Text("\(security.scannedCount) / \(security.totalToScan) — \(security.currentPackageScanned)")
+                            .font(DesignSystem.Typography.monospace)
+                            .foregroundColor(.secondary)
+                        Button("Interrompre") { security.cancelAudit() }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    } else {
+                        Button {
+                            appState.selectedTab = .securityAudit
+                            appState.runSecurityAudit(force: true)
+                        } label: {
+                            Label(security.hasAuditResults ? "Relancer l'audit" : "Lancer l'audit",
+                                  systemImage: "shield.lefthalf.filled")
+                                .font(.system(size: 13, weight: .bold))
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
+                    }
+                }
+
+                if security.isScanning && security.totalToScan > 0 {
+                    ProgressView(value: Double(security.scannedCount), total: Double(security.totalToScan))
+                        .tint(.blue)
+                }
+
+                Text(summary)
+                    .font(DesignSystem.Typography.body)
+                    .foregroundColor(security.vulnerableCount > 0 ? .orange : .secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if security.hasAuditResults {
+                    HStack(spacing: 8) {
+                        if security.knownExploitedCount > 0 {
+                            StatusBadge(text: "\(security.knownExploitedCount) faille(s) à exploitation avérée",
+                                        color: .red, icon: "flame.fill")
+                        }
+                        if !security.scanFailures.isEmpty {
+                            StatusBadge(text: "\(security.scanFailures.count) interrogation(s) échouée(s)",
+                                        color: .red, icon: "wifi.exclamationmark")
+                        }
+                        if !security.untrackedPackages.isEmpty {
+                            StatusBadge(text: "\(security.untrackedPackages.count) paquet(s) non répertorié(s)",
+                                        color: .secondary, icon: "questionmark.circle.fill")
+                        }
+                        Spacer()
+                        Button("Ouvrir l'audit détaillé") { appState.selectedTab = .securityAudit }
+                            .buttonStyle(.link)
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                }
+            }
+            .padding(4)
+        }
+    }
+
+    private var iconName: String {
+        if !security.hasAuditResults { return "shield.slash" }
+        return security.vulnerableCount > 0 ? "exclamationmark.shield.fill" : "checkmark.shield.fill"
+    }
+
+    private var accentColor: Color {
+        if !security.hasAuditResults { return .secondary }
+        return security.vulnerableCount > 0 ? .orange : .green
+    }
+
+    private var summary: String {
+        if security.isScanning {
+            return "Analyse en cours contre la base \(security.source.fullDescription)."
+        }
+        guard let date = security.lastAuditDate else {
+            return "Aucun audit en mémoire. Le démarrage se contente d'actualiser Homebrew ; l'analyse des vulnérabilités interroge une base distante paquet par paquet et se lance à la demande."
+        }
+        let stamp = "Dernier audit : \(Self.dateFormatter.string(from: date))."
+        if security.vulnerableCount == 0 {
+            return "\(stamp) Aucune faille encore ouverte parmi les paquets vérifiés (source : \(security.source.fullDescription))."
+        }
+        return "\(stamp) ⚠️ \(security.vulnerableCount) paquet(s) portent des failles encore ouvertes pour la version installée."
     }
 }
