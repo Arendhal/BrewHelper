@@ -244,6 +244,10 @@ struct PackageSecuritySection: View {
                 vulnerabilityList
             }
 
+            if let rejected = security.rejectedAdvisories[package.name], !rejected.isEmpty {
+                RejectedAdvisoriesView(advisories: rejected)
+            }
+
             if !vulnerabilities.isEmpty {
                 RemediationPlanCard(package: package, vulnerabilities: vulnerabilities)
             }
@@ -371,6 +375,11 @@ struct VulnerabilityCard: View {
                     .font(DesignSystem.Typography.body)
                     .fixedSize(horizontal: false, vertical: true)
 
+                // Pourquoi cet avis a été rattaché à ce paquet : le rapprochement doit être vérifiable.
+                if let identity = vulnerability.identity {
+                    IdentityBadge(identity: identity)
+                }
+
                 // Quelle base a relevé la faille, et la page officielle de chacune.
                 HStack(spacing: 8) {
                     Label("Relevée par", systemImage: "externaldrive.connected.to.line.below")
@@ -417,5 +426,65 @@ struct SourceTag: View {
         }
         .buttonStyle(.plain)
         .help("Ouvrir la page \(reference.source) de cette faille : \(reference.url)")
+    }
+}
+
+/// Le produit publié par la base, la confiance du rapprochement et les indices qui la fondent.
+struct IdentityBadge: View {
+    let identity: ProductIdentity
+
+    private var color: Color {
+        switch identity.confidence {
+        case .strong: return .green
+        case .probable: return .orange
+        case .weak: return .red
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: identity.confidence == .strong ? "checkmark.seal.fill" : "questionmark.diamond.fill")
+                .font(.system(size: 11))
+                .foregroundColor(color)
+            Text("Produit de l'avis : \(identity.summary) — correspondance \(identity.confidence.localizedLabel)")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Spacer()
+        }
+        .help(identity.reasons.map { "• \($0)" }.joined(separator: "\n"))
+    }
+}
+
+/// Les avis écartés et pourquoi : ce qui n'est pas retenu doit pouvoir se justifier.
+struct RejectedAdvisoriesView: View {
+    let advisories: [RejectedAdvisory]
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 6) {
+                ForEach(advisories) { advisory in
+                    HStack(alignment: .top, spacing: 8) {
+                        Text(advisory.advisoryID)
+                            .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                        Text(advisory.source)
+                            .font(.system(size: 10, weight: .bold))
+                            .padding(.horizontal, 5)
+                            .background(Color.secondary.opacity(0.15))
+                            .cornerRadius(4)
+                        Text("« \(advisory.product) » — \(advisory.reason)")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                    }
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("\(advisories.count) avis écarté(s) : homonyme, extension ou autre plateforme", systemImage: "eye.slash")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
     }
 }

@@ -243,6 +243,8 @@ struct AuditControlPanel: View {
 struct APIKeyEditor: View {
     @ObservedObject private var security: CVESecurityService = .shared
     @Environment(\.openURL) var openURL
+    @State private var isChecking = false
+    @State private var check: CVESecurityService.KeyCheck? = nil
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -255,6 +257,35 @@ struct APIKeyEditor: View {
             TextField("Coller la clé ici", text: $security.nvdAPIKey)
                 .textFieldStyle(.roundedBorder)
                 .font(DesignSystem.Typography.monospace)
+            HStack(spacing: 8) {
+                Button {
+                    Task {
+                        isChecking = true
+                        check = await security.checkNVDKey()
+                        isChecking = false
+                    }
+                } label: {
+                    Label("Tester la clé", systemImage: "checkmark.seal")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .disabled(security.nvdAPIKey.isEmpty || isChecking)
+                if isChecking { ProgressView().controlSize(.small) }
+                switch check {
+                case .valid:
+                    Label("Clé acceptée", systemImage: "checkmark.circle.fill")
+                        .font(.system(size: 11)).foregroundColor(.green)
+                case .rejected:
+                    Label("Clé refusée par NIST", systemImage: "xmark.circle.fill")
+                        .font(.system(size: 11)).foregroundColor(.red)
+                case .unreachable(let reason):
+                    Label(reason, systemImage: "wifi.exclamationmark")
+                        .font(.system(size: 11)).foregroundColor(.orange)
+                case nil:
+                    EmptyView()
+                }
+            }
+            .onChange(of: security.nvdAPIKey) { check = nil }
             HStack {
                 Button("Demander une clé") {
                     if let url = URL(string: "https://nvd.nist.gov/developers/request-an-api-key") {

@@ -15,6 +15,9 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
     public let dependencies: [String]
     public let bottleArchitectures: [String]
     public let caveats: String?
+    /// URL de l'archive source (`urls.stable.url`) : avec la page d'accueil, elle désigne le
+    /// projet amont, ce qui permet de reconnaître ses avis par leurs références.
+    public let sourceURL: String?
     
     public init(
         id: String,
@@ -30,7 +33,8 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         cveStatus: PackageCVEStatus = .unscanned,
         dependencies: [String] = [],
         bottleArchitectures: [String] = [],
-        caveats: String? = nil
+        caveats: String? = nil,
+        sourceURL: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -46,6 +50,7 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         self.dependencies = dependencies
         self.bottleArchitectures = bottleArchitectures
         self.caveats = caveats
+        self.sourceURL = sourceURL
     }
 }
 
@@ -82,10 +87,12 @@ public struct FormulaDTO: Codable {
     public let caveats: String?
     public let bottle: FormulaBottleDTO?
     public let outdated: Bool?
+    public let urls: FormulaURLsDTO?
 
     enum CodingKeys: String, CodingKey {
         case name
         case fullName = "full_name"
+        case urls
         case desc
         case homepage
         case versions
@@ -137,9 +144,18 @@ public struct FormulaDTO: Codable {
             isOutdated: isOut,
             dependencies: dependencies ?? [],
             bottleArchitectures: architectures,
-            caveats: caveats
+            caveats: caveats,
+            sourceURL: urls?.stable?.url
         )
     }
+}
+
+public struct FormulaURLsDTO: Codable {
+    public let stable: FormulaURLDTO?
+}
+
+public struct FormulaURLDTO: Codable {
+    public let url: String?
 }
 
 public struct FormulaVersionsDTO: Codable {
@@ -168,6 +184,7 @@ public struct CaskDTO: Codable {
     public let caveats: String?
     public let installed: String?
     public let outdated: Bool?
+    public let url: String?
 
     public func toBrewPackage(outdatedList: Set<String>) -> BrewPackage {
         let displayName = name?.first ?? token
@@ -197,7 +214,8 @@ public struct CaskDTO: Codable {
             isOutdated: isOut,
             dependencies: [],
             bottleArchitectures: ["macOS Universal / Native Cask"],
-            caveats: caveats
+            caveats: caveats,
+            sourceURL: url
         )
     }
 }

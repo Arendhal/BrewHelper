@@ -24,7 +24,9 @@ public enum ScanOutcome: Sendable {
 /// la version installée corrige déjà. Le tri n'a lieu qu'une fois les bases recoupées, car
 /// c'est le recoupement qui départage deux bases en désaccord.
 public enum SourceOutcome: Sendable {
-    case assessed([CVEVulnerability])
+    /// `rejected` : les avis dont le nom correspondait mais que les autres indices d'identité
+    /// ont écartés, avec leur raison — ce qui n'est pas retenu doit pouvoir se justifier.
+    case assessed([CVEVulnerability], rejected: [RejectedAdvisory])
     case notTracked
     case failed(String)
 }
@@ -94,6 +96,10 @@ public class CVESecurityService: ObservableObject {
     @Published public private(set) var scanFailures: [String: String] = [:]
     /// Paquets absents de la base interrogée.
     @Published public private(set) var untrackedPackages: Set<String> = []
+    /// Avis dont le nom correspondait à un paquet mais que les indices d'identité (éditeur,
+    /// plateforme, schéma de version, références) ont écartés : ce qui n'est pas retenu doit
+    /// pouvoir se justifier.
+    @Published public private(set) var rejectedAdvisories: [String: [RejectedAdvisory]] = [:]
 
     // Le complément (NVD en mode hybride) tourne sur sa propre file, après et pendant
     // l'audit principal : il a sa progression, et ses échecs n'invalident pas un résultat
@@ -116,6 +122,44 @@ public class CVESecurityService: ObservableObject {
     /// Clé d'API NVD. Sans elle NIST limite à 5 requêtes par 30 s ; avec elle, à 50.
     @Published public var nvdAPIKey: String {
         didSet { UserDefaults.standard.set(nvdAPIKey, forKey: Self.apiKeyDefaultsKey) }
+    }
+
+    /// La clé telle qu'elle part vers NIST. Une clé collée avec un espace ou un retour à la
+    /// ligne en bout est refusée par la NVD (« Invalid apiKey »), exactement comme une fausse.
+    var effectiveAPIKey: String {
+        nvdAPIKey.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    public enum KeyCheck: Equatable {
+        case valid
+        case rejected
+        case unreachable(String)
+    }
+
+    /// Interroge réellement la NVD avec la clé saisie, pour qu'une clé fausse se voit tout
+    /// de suite plutôt qu'au milieu d'un audit.
+    public func checkNVDKey() async -> KeyCheck {
+        let key = effectiveAPIKey
+        guard !key.isEmpty else { return .rejected }
+        guard let url = URL(string: "https://services.nvd.nist.gov/rest/json/cves/2.0?resultsPerPage=1") else {
+            return .unreachable("URL invalide")
+        }
+        var request = URLRequest(url: url)
+        request.timeoutInterval = 20
+        request.setValue("BrewHelper macOS Security Audit", forHTTPHeaderField: "User-Agent")
+        request.setValue(key, forHTTPHeaderField: "apiKey")
+        do {
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse else { return .unreachable("Réponse illisible") }
+            switch http.statusCode {
+            case 200: return .valid
+            case 404, 401: return .rejected   // NIST répond 404 « Invalid apiKey. »
+            case 403, 429: return .unreachable("Quota dépassé, réessayez dans 30 secondes")
+            default: return .unreachable("Code \(http.statusCode)")
+            }
+        } catch {
+            return .unreachable("Réseau indisponible")
+        }
     }
 
     public var vulnerableCount: Int {
@@ -198,6 +242,7 @@ public class CVESecurityService: ObservableObject {
         scannedVersions.removeAll()
         scanFailures.removeAll()
         untrackedPackages.removeAll()
+        rejectedAdvisories.removeAll()
         sourceOutcomes.removeAll()
         pendingEnrichment.removeAll()
         scannedCount = 0
@@ -260,6 +305,7 @@ public class CVESecurityService: ObservableObject {
                 scannedVersions.removeValue(forKey: package.name)
                 scanFailures.removeValue(forKey: package.name)
                 untrackedPackages.remove(package.name)
+                rejectedAdvisories.removeValue(forKey: package.name)
                 onUpdate(package.id, .unscanned)
             }
         }
@@ -357,7 +403,7 @@ public class CVESecurityService: ObservableObject {
                          queue: PriorityWorkQueue<BrewPackage>,
                          onStart: @escaping (BrewPackage) -> Void,
                          onResult: @escaping (BrewPackage, SourceOutcome) async -> Void) async {
-        let fetcher = VulnerabilityFetcher(source: source, apiKey: nvdAPIKey)
+        let fetcher = VulnerabilityFetcher(source: source, apiKey: effectiveAPIKey)
         let concurrency = max(1, fetcher.maxConcurrentRequests)
 
         await withTaskGroup(of: (BrewPackage, SourceOutcome).self) { group in
@@ -393,6 +439,9 @@ public class CVESecurityService: ObservableObject {
                         for package: BrewPackage,
                         onUpdate: @escaping (String, PackageCVEStatus) -> Void) {
         sourceOutcomes[package.name, default: [:]][source] = outcome
+        var rejected: [RejectedAdvisory] = []
+        for case .assessed(_, let list) in sourceOutcomes[package.name, default: [:]].values { rejected += list }
+        rejectedAdvisories[package.name] = Array(Set(rejected)).sorted { ($0.source, $0.advisoryID) < ($1.source, $1.advisoryID) }
         let combined = Self.combine(Array(sourceOutcomes[package.name, default: [:]].values))
         apply(combined, to: package, onUpdate: onUpdate)
     }
@@ -406,7 +455,7 @@ public class CVESecurityService: ObservableObject {
         var failure: String? = nil
         for outcome in outcomes {
             switch outcome {
-            case .assessed(let flaws):
+            case .assessed(let flaws, _):
                 answered = true
                 assessed.append(contentsOf: flaws)
             case .notTracked:
@@ -470,7 +519,7 @@ public class CVESecurityService: ObservableObject {
         sourceOutcomes.removeValue(forKey: package.name)
         await ThreatIntelService.shared.refreshKnownExploitedIfNeeded()
 
-        let apiKey = nvdAPIKey
+        let apiKey = effectiveAPIKey
         let primaryOutcome = await VulnerabilityFetcher(source: members[0], apiKey: apiKey).fetchAssessed(for: package)
         record(primaryOutcome, from: members[0], for: package) { _, _ in }
         await refreshThreatIntel(forPackage: package)
@@ -511,7 +560,7 @@ public class CVESecurityService: ObservableObject {
 
     /// Bump whenever the matching / version logic changes: verdicts computed by an older engine
     /// would otherwise survive in the cache and keep showing the old (wrong) results.
-    private static let engineVersion = 3
+    private static let engineVersion = 4
 
     private struct AuditSnapshot: Codable {
         var engine: Int? = nil
@@ -520,6 +569,7 @@ public class CVESecurityService: ObservableObject {
         let versions: [String: String]
         let vulnerabilities: [String: [CVEVulnerability]]
         let untracked: [String]
+        var rejected: [String: [RejectedAdvisory]]? = nil
     }
 
     private func saveToDisk() {
@@ -533,7 +583,8 @@ public class CVESecurityService: ObservableObject {
                                      date: date,
                                      versions: scannedVersions,
                                      vulnerabilities: packageVulnerabilities,
-                                     untracked: Array(untrackedPackages))
+                                     untracked: Array(untrackedPackages),
+                                     rejected: rejectedAdvisories)
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -548,6 +599,7 @@ public class CVESecurityService: ObservableObject {
         scannedVersions = snapshot.versions
         packageVulnerabilities = snapshot.vulnerabilities
         untrackedPackages = Set(snapshot.untracked)
+        rejectedAdvisories = snapshot.rejected ?? [:]
         lastAuditDate = snapshot.date
     }
 
@@ -653,27 +705,50 @@ public struct VulnerabilityFetcher: Sendable {
             }
         }
 
-        if items.isEmpty && (first.totalResults ?? 0) == 0 {
-            // Aucun résultat peut signifier « rien à signaler » comme « le nom Homebrew
-            // n'est pas celui du dictionnaire CPE » — Node.js y est publié sous « nodejs ».
-            // On demande alors au dictionnaire le produit correspondant, et on ne conclut
-            // à l'absence de suivi que s'il n'en connaît aucun.
-            guard let resolved = await resolveCPEProduct(for: package),
-                  resolved != product,
-                  let encodedResolved = resolved.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
+        var (flaws, rejected) = evaluate(items, for: package)
+
+        if flaws.isEmpty {
+            // Aucun avis exploitable : soit la NVD ne suit pas ce nom, soit elle le suit et rien
+            // ne vise cette version, soit tout ce qu'elle a renvoyé concernait un homonyme
+            // (l'extension Python de Visual Studio Code pour `python`). Le dictionnaire CPE
+            // tranche : Node.js y est publié sous « nodejs », et on ne conclut à l'absence de
+            // suivi que s'il ne connaît aucun produit de ce nom.
+            guard let resolved = await resolveCPEProduct(for: package) else { return .notTracked }
+            // Le dictionnaire connaît le produit sous le nom même qu'on a interrogé : il est
+            // suivi, et aucune faille ne vise cette version. C'est un paquet sain, pas un
+            // paquet inconnu (xz 5.8.4, c-ares, libidn2... s'affichaient « non suivis »).
+            if resolved == product { return .assessed([], rejected: rejected) }
+            guard let encodedResolved = resolved.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
                 return .notTracked
             }
             let retry = "cpe:2.3:a:*:\(encodedResolved):\(encodedVersion):*:*:*:*:*:*:*"
-            guard case .success(let response) = await request(
-                NVDCVEResponse.self,
-                urlString: "\(base)?virtualMatchString=\(retry)&resultsPerPage=\(Self.pageSize)") else {
-                return .notTracked
+            // Une requête refusée est un échec à montrer, pas une absence de suivi.
+            let response: NVDCVEResponse
+            switch await request(NVDCVEResponse.self,
+                                 urlString: "\(base)?virtualMatchString=\(retry)&resultsPerPage=\(Self.pageSize)") {
+            case .failure(let reason): return .failed(reason)
+            case .success(let decoded): response = decoded
             }
-            items = response.vulnerabilities ?? []
-            if items.isEmpty { return .assessed([]) }
+            let retried = evaluate(response.vulnerabilities ?? [], for: package)
+            flaws = retried.flaws
+            rejected += retried.rejected
         }
 
-        return .assessed(items.compactMap { $0.cve?.assess(for: package) })
+        return .assessed(flaws, rejected: rejected)
+    }
+
+    private func evaluate(_ items: [NVDCVEItem], for package: BrewPackage) -> (flaws: [CVEVulnerability], rejected: [RejectedAdvisory]) {
+        var flaws: [CVEVulnerability] = []
+        var rejected: [RejectedAdvisory] = []
+        for item in items {
+            guard let cve = item.cve else { continue }
+            switch cve.evaluate(for: package) {
+            case .kept(let flaw): flaws.append(flaw)
+            case .rejected(let advisory): rejected.append(advisory)
+            case .irrelevant: break
+            }
+        }
+        return (flaws, rejected)
     }
 
     /// Nom du produit dans le dictionnaire CPE de NIST. Le nom d'une formule Homebrew ne
@@ -740,9 +815,17 @@ public struct VulnerabilityFetcher: Sendable {
         // Every advisory the database returned for a *different* software (xz -> "xzs-mysql")
         // is noise: when none of them concerns this package, EUVD does not track it, which is
         // not the same thing as « aucune faille ».
-        let assessed = collected.compactMap { $0.assess(for: package) }
-        guard !assessed.isEmpty else { return .notTracked }
-        return .assessed(assessed)
+        var flaws: [CVEVulnerability] = []
+        var rejected: [RejectedAdvisory] = []
+        for item in collected {
+            switch item.evaluate(for: package) {
+            case .kept(let flaw): flaws.append(flaw)
+            case .rejected(let advisory): rejected.append(advisory)
+            case .irrelevant: break
+            }
+        }
+        guard !flaws.isEmpty else { return .notTracked }
+        return .assessed(flaws, rejected: rejected)
     }
 
     // MARK: Transport
@@ -782,6 +865,9 @@ public struct VulnerabilityFetcher: Sendable {
                     } catch {
                         return .failure("Réponse inattendue de la base")
                     }
+                case 404 where source == .nvd && !apiKey.isEmpty:
+                    // NIST répond 404 « Invalid apiKey. » : réessayer ne servirait à rien.
+                    return .failure("Clé d'API NVD refusée par NIST — vérifiez-la dans le bouton « Clé d'API NVD »")
                 case 403, 429:
                     lastError = source == .nvd && apiKey.isEmpty
                         ? "Quota NVD dépassé (5 requêtes/30 s sans clé d'API)"
