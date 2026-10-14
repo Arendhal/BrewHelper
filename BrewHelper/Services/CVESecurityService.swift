@@ -20,6 +20,64 @@ public enum ScanOutcome: Sendable {
     case failed(String)
 }
 
+/// Ce qu'**une** base a répondu, avant tout filtrage : les avis encore ouverts comme ceux que
+/// la version installée corrige déjà. Le tri n'a lieu qu'une fois les bases recoupées, car
+/// c'est le recoupement qui départage deux bases en désaccord.
+public enum SourceOutcome: Sendable {
+    case assessed([CVEVulnerability])
+    case notTracked
+    case failed(String)
+}
+
+/// File de travail à deux niveaux de priorité, alimentée pendant qu'on la consomme : EUVD y
+/// verse les paquets au fur et à mesure et la NVD les en retire à son rythme, ceux qu'EUVD ne
+/// connaît pas en tête.
+actor PriorityWorkQueue<Element: Sendable> {
+    private var urgent: [Element] = []
+    private var regular: [Element] = []
+    private var waiters: [CheckedContinuation<Element?, Never>] = []
+    private var closed = false
+
+    func push(_ element: Element, urgent isUrgent: Bool = false) {
+        guard !closed else { return }
+        if !waiters.isEmpty {
+            waiters.removeFirst().resume(returning: element)
+        } else if isUrgent {
+            urgent.append(element)
+        } else {
+            regular.append(element)
+        }
+    }
+
+    /// Plus rien à venir : les consommateurs en attente repartent les mains vides.
+    func close() {
+        closed = true
+        for waiter in waiters { waiter.resume(returning: nil) }
+        waiters.removeAll()
+    }
+
+    /// Ferme et jette ce qui n'a pas été pris.
+    func cancel() {
+        urgent.removeAll()
+        regular.removeAll()
+        close()
+    }
+
+    /// Prend un élément s'il y en a un, sans attendre.
+    func take() -> Element? {
+        if !urgent.isEmpty { return urgent.removeFirst() }
+        if !regular.isEmpty { return regular.removeFirst() }
+        return nil
+    }
+
+    /// Prend un élément, en attendant qu'il en arrive un tant que la file n'est pas close.
+    func next() async -> Element? {
+        if let element = take() { return element }
+        if closed { return nil }
+        return await withCheckedContinuation { waiters.append($0) }
+    }
+}
+
 @MainActor
 public class CVESecurityService: ObservableObject {
     public static let shared = CVESecurityService()
@@ -36,6 +94,18 @@ public class CVESecurityService: ObservableObject {
     @Published public private(set) var scanFailures: [String: String] = [:]
     /// Paquets absents de la base interrogée.
     @Published public private(set) var untrackedPackages: Set<String> = []
+
+    // Le complément (NVD en mode hybride) tourne sur sa propre file, après et pendant
+    // l'audit principal : il a sa progression, et ses échecs n'invalident pas un résultat
+    // que l'autre base a déjà fourni.
+    @Published public private(set) var isEnriching: Bool = false
+    @Published public private(set) var enrichedCount: Int = 0
+    @Published public private(set) var totalToEnrich: Int = 0
+    @Published public private(set) var currentEnrichmentPackage: String = ""
+    /// Paquets que la base de complément n'a pas pu interroger (quota, réseau...).
+    @Published public private(set) var enrichmentFailures: Int = 0
+    /// Paquets dont le complément est encore attendu : leur verdict peut encore s'étoffer.
+    @Published public private(set) var pendingEnrichment: Set<String> = []
 
     /// Failles encore ouvertes sur la version installée, par paquet. Ce que la version
     /// installée corrige déjà est écarté au moment du scan.
@@ -60,6 +130,12 @@ public class CVESecurityService: ObservableObject {
     public var hasAuditResults: Bool { lastAuditDate != nil }
 
     private var scanTask: Task<Void, Never>? = nil
+    private var enrichTask: Task<Void, Never>? = nil
+    private var primaryQueue: PriorityWorkQueue<BrewPackage>? = nil
+    private var enrichmentQueue: PriorityWorkQueue<BrewPackage>? = nil
+    /// Réponse de chaque base, par paquet, pour recouper dès qu'une nouvelle arrive. Seul le
+    /// résultat recoupé est conservé sur disque.
+    private var sourceOutcomes: [String: [VulnDatabaseSource: SourceOutcome]] = [:]
     private static let sourceDefaultsKey = "BrewHelper.VulnDatabaseSource"
     private static let apiKeyDefaultsKey = "BrewHelper.NVDAPIKey"
     private static let cacheFileName = "audit-cache.json"
@@ -69,7 +145,7 @@ public class CVESecurityService: ObservableObject {
            let restored = VulnDatabaseSource(rawValue: saved) {
             self.source = restored
         } else {
-            self.source = .euvd
+            self.source = .hybrid
         }
         self.nvdAPIKey = UserDefaults.standard.string(forKey: Self.apiKeyDefaultsKey) ?? ""
         loadFromDisk()
@@ -111,7 +187,7 @@ public class CVESecurityService: ObservableObject {
     /// l'autre : ils sont effacés, et l'audit est à relancer.
     public func switchSource(to newSource: VulnDatabaseSource) {
         guard newSource != source else { return }
-        scanTask?.cancel()
+        stopWorkers()
         source = newSource
         UserDefaults.standard.set(newSource.rawValue, forKey: Self.sourceDefaultsKey)
         clearResults()
@@ -122,27 +198,53 @@ public class CVESecurityService: ObservableObject {
         scannedVersions.removeAll()
         scanFailures.removeAll()
         untrackedPackages.removeAll()
+        sourceOutcomes.removeAll()
+        pendingEnrichment.removeAll()
         scannedCount = 0
         totalToScan = 0
+        enrichedCount = 0
+        totalToEnrich = 0
+        enrichmentFailures = 0
         lastAuditDate = nil
         isScanning = false
+        isEnriching = false
         saveToDisk()
     }
 
     // MARK: - Audit
 
     public func cancelAudit() {
-        scanTask?.cancel()
-        scanTask = nil
+        stopWorkers()
         isScanning = false
+        isEnriching = false
+        pendingEnrichment.removeAll()
         currentPackageScanned = "Audit interrompu"
+        saveToDisk()
+    }
+
+    private func stopWorkers() {
+        scanTask?.cancel()
+        enrichTask?.cancel()
+        scanTask = nil
+        enrichTask = nil
+        // Les consommateurs bloqués sur une file vide ne verraient jamais l'annulation.
+        let queues = [primaryQueue, enrichmentQueue].compactMap { $0 }
+        primaryQueue = nil
+        enrichmentQueue = nil
+        Task { for queue in queues { await queue.cancel() } }
     }
 
     /// Lance l'audit. `force` réexamine aussi les paquets déjà audités contre la même version.
+    ///
+    /// La première base de `source.members` porte l'audit. Les suivantes (la NVD en mode
+    /// hybride) tournent en parallèle sur leur propre file, avec leur propre cadence : une
+    /// base lente ne ralentit jamais la première.
     public func startAudit(for packages: [BrewPackage],
                            force: Bool = false,
                            onUpdate: @escaping (String, PackageCVEStatus) -> Void) {
-        scanTask?.cancel()
+        stopWorkers()
+        isEnriching = false
+        pendingEnrichment.removeAll()
 
         let toScan = force ? packages : packages.filter { cachedVulnerabilities(for: $0) == nil }
         guard !toScan.isEmpty else {
@@ -151,8 +253,9 @@ public class CVESecurityService: ObservableObject {
             return
         }
 
-        if force {
-            for package in toScan {
+        for package in toScan {
+            sourceOutcomes.removeValue(forKey: package.name)
+            if force {
                 packageVulnerabilities.removeValue(forKey: package.name)
                 scannedVersions.removeValue(forKey: package.name)
                 scanFailures.removeValue(forKey: package.name)
@@ -161,25 +264,86 @@ public class CVESecurityService: ObservableObject {
             }
         }
 
+        let members = source.members
+        let primary = members[0]
+        let secondary = members.count > 1 ? members[1] : nil
+
         isScanning = true
         totalToScan = toScan.count
         scannedCount = 0
         currentPackageScanned = ""
 
-        let fetcher = makeFetcher()
+        let primaryWork = PriorityWorkQueue<BrewPackage>()
+        primaryQueue = primaryWork
+        var enrichmentWork: PriorityWorkQueue<BrewPackage>? = nil
+
+        if let secondary = secondary {
+            let queue = PriorityWorkQueue<BrewPackage>()
+            enrichmentWork = queue
+            enrichmentQueue = queue
+            isEnriching = true
+            enrichedCount = 0
+            totalToEnrich = toScan.count
+            enrichmentFailures = 0
+            currentEnrichmentPackage = ""
+            pendingEnrichment = Set(toScan.map { $0.name })
+
+            enrichTask = Task { [weak self] in
+                guard let self = self else { return }
+                await self.runPool(source: secondary, queue: queue, onStart: { _ in }) { package, outcome in
+                    self.enrichedCount += 1
+                    self.currentEnrichmentPackage = package.name
+                    self.pendingEnrichment.remove(package.name)
+                    if case .failed = outcome { self.enrichmentFailures += 1 }
+                    self.record(outcome, from: secondary, for: package, onUpdate: onUpdate)
+                }
+                if !Task.isCancelled {
+                    await self.applyThreatIntel()
+                    self.lastAuditDate = Date()
+                    self.pendingEnrichment.removeAll()
+                    self.currentEnrichmentPackage = "Complément \(secondary.shortLabel) terminé"
+                    RemediationService.shared.invalidate()
+                    self.isEnriching = false
+                    self.saveToDisk()
+                }
+            }
+        }
 
         scanTask = Task { [weak self] in
             guard let self = self else { return }
 
+            // Rempli ici, dans l'ordre et avant la fermeture : des envois lancés en tâches
+            // séparées pouvaient se faire doubler par `close()` et être perdus.
+            for package in toScan { await primaryWork.push(package) }
+            await primaryWork.close()
+
             // Le catalogue KEV sert à hiérarchiser tout le reste : il est chargé d'abord.
             await ThreatIntelService.shared.refreshKnownExploitedIfNeeded()
 
-            await self.scan(toScan, using: fetcher, onUpdate: onUpdate)
+            await self.runPool(source: primary, queue: primaryWork, onStart: { package in
+                onUpdate(package.id, .scanning)
+            }) { package, outcome in
+                self.scannedCount += 1
+                self.currentPackageScanned = package.name
+                self.record(outcome, from: primary, for: package, onUpdate: onUpdate)
+                // La base de complément prend la suite : les paquets qu'EUVD ne connaît pas
+                // (ou n'a pas pu lire) sont ceux où elle sert le plus, elle les traite d'abord.
+                if let queue = enrichmentWork {
+                    let needsHelp: Bool
+                    switch outcome {
+                    case .assessed: needsHelp = false
+                    case .notTracked, .failed: needsHelp = true
+                    }
+                    await queue.push(package, urgent: needsHelp)
+                }
+            }
+
+            if let queue = enrichmentWork { await queue.close() }
 
             if !Task.isCancelled {
                 await self.applyThreatIntel()
                 self.lastAuditDate = Date()
-                self.currentPackageScanned = "Audit terminé"
+                self.currentPackageScanned = secondary == nil ? "Audit terminé" : "Audit \(primary.shortLabel) terminé"
                 RemediationService.shared.invalidate()
             }
             self.isScanning = false
@@ -187,34 +351,73 @@ public class CVESecurityService: ObservableObject {
         }
     }
 
-    /// Audite les paquets en parallèle, dans la limite que tolère la base interrogée.
-    private func scan(_ packages: [BrewPackage],
-                      using fetcher: VulnerabilityFetcher,
-                      onUpdate: @escaping (String, PackageCVEStatus) -> Void) async {
-        let concurrency = min(fetcher.maxConcurrentRequests, packages.count)
+    /// Fait travailler une base sur sa file : plusieurs paquets de front dans la limite qu'elle
+    /// tolère, sans jamais rester bloqué sur une file vide tant qu'un résultat est en vol.
+    private func runPool(source: VulnDatabaseSource,
+                         queue: PriorityWorkQueue<BrewPackage>,
+                         onStart: @escaping (BrewPackage) -> Void,
+                         onResult: @escaping (BrewPackage, SourceOutcome) async -> Void) async {
+        let fetcher = VulnerabilityFetcher(source: source, apiKey: nvdAPIKey)
+        let concurrency = max(1, fetcher.maxConcurrentRequests)
 
-        await withTaskGroup(of: (BrewPackage, ScanOutcome).self) { group in
-            var next = 0
-            func enqueue() {
-                guard next < packages.count else { return }
-                let package = packages[next]
-                next += 1
-                onUpdate(package.id, .scanning)
-                group.addTask { (package, await fetcher.fetch(for: package)) }
+        await withTaskGroup(of: (BrewPackage, SourceOutcome).self) { group in
+            var inFlight = 0
+
+            func launch(_ package: BrewPackage) {
+                onStart(package)
+                group.addTask { (package, await fetcher.fetchAssessed(for: package)) }
+                inFlight += 1
             }
-            for _ in 0..<concurrency { enqueue() }
 
-            while let (package, outcome) = await group.next() {
-                if Task.isCancelled {
-                    group.cancelAll()
-                    break
+            while !Task.isCancelled {
+                while inFlight < concurrency, let package = await queue.take() { launch(package) }
+
+                if inFlight == 0 {
+                    // Rien en vol : on peut attendre le prochain paquet sans rien retarder.
+                    guard let package = await queue.next() else { break }
+                    launch(package)
+                    continue
                 }
-                currentPackageScanned = package.name
-                scannedCount += 1
-                apply(outcome, to: package, onUpdate: onUpdate)
-                enqueue()
+                guard let (package, outcome) = await group.next() else { break }
+                inFlight -= 1
+                if Task.isCancelled { break }
+                await onResult(package, outcome)
+            }
+            group.cancelAll()
+        }
+    }
+
+    /// Enregistre la réponse d'une base et recoupe avec celles déjà reçues pour ce paquet.
+    private func record(_ outcome: SourceOutcome,
+                        from source: VulnDatabaseSource,
+                        for package: BrewPackage,
+                        onUpdate: @escaping (String, PackageCVEStatus) -> Void) {
+        sourceOutcomes[package.name, default: [:]][source] = outcome
+        let combined = Self.combine(Array(sourceOutcomes[package.name, default: [:]].values))
+        apply(combined, to: package, onUpdate: onUpdate)
+    }
+
+    /// Recoupe les réponses des bases. Une base en panne ne masque pas ce que l'autre a
+    /// trouvé ; si aucune n'a rien trouvé, une panne l'emporte sur « non suivi » (un audit
+    /// incomplet n'est pas un audit négatif).
+    nonisolated static func combine(_ outcomes: [SourceOutcome]) -> ScanOutcome {
+        var assessed: [CVEVulnerability] = []
+        var answered = false
+        var failure: String? = nil
+        for outcome in outcomes {
+            switch outcome {
+            case .assessed(let flaws):
+                answered = true
+                assessed.append(contentsOf: flaws)
+            case .notTracked:
+                break
+            case .failed(let reason):
+                failure = failure ?? reason
             }
         }
+        if answered { return .found(openFlawsNewestFirst(assessed)) }
+        if let failure = failure { return .failed(failure) }
+        return .notTracked
     }
 
     private func apply(_ outcome: ScanOutcome,
@@ -229,9 +432,12 @@ public class CVESecurityService: ObservableObject {
             untrackedPackages.insert(package.name)
             store([], for: package)
             onUpdate(package.id, .notTracked)
-        case .found(let flaws):
+        case .found(let found):
             scanFailures.removeValue(forKey: package.name)
             untrackedPackages.remove(package.name)
+            // Le renseignement déjà connu (KEV, EPSS) est rejoué : un complément tardif ne
+            // doit pas faire perdre le drapeau « exploité » aux failles fusionnées.
+            let flaws = ThreatIntelService.shared.enrich(found).sorted { $0.riskScore > $1.riskScore }
             store(flaws, for: package)
             if flaws.isEmpty {
                 onUpdate(package.id, .clean)
@@ -245,6 +451,7 @@ public class CVESecurityService: ObservableObject {
     /// Ajoute aux failles retenues l'exploitation avérée (KEV) et la probabilité
     /// d'exploitation (EPSS), en une poignée de requêtes pour tout l'audit.
     private func applyThreatIntel() async {
+        await ThreatIntelService.shared.refreshKnownExploitedIfNeeded()
         let identifiers = packageVulnerabilities.values.flatMap { $0 }.map { $0.id }
         guard !identifiers.isEmpty else { return }
         await ThreatIntelService.shared.fetchEPSS(for: identifiers)
@@ -254,24 +461,42 @@ public class CVESecurityService: ObservableObject {
         }
     }
 
+    /// Analyse un paquet isolé. La première base répond avant le retour ; les suivantes
+    /// complètent le résultat en arrière-plan, comme pendant un audit complet.
     public func checkSinglePackageNow(package: BrewPackage, force: Bool = false) async -> [CVEVulnerability] {
         if !force, let cached = cachedVulnerabilities(for: package) { return cached }
 
+        let members = source.members
+        sourceOutcomes.removeValue(forKey: package.name)
         await ThreatIntelService.shared.refreshKnownExploitedIfNeeded()
-        let outcome = await makeFetcher().fetch(for: package)
-        apply(outcome, to: package) { _, _ in }
 
-        if case .found(let flaws) = outcome, !flaws.isEmpty {
-            await ThreatIntelService.shared.fetchEPSS(for: flaws.map { $0.id })
-            let enriched = ThreatIntelService.shared.enrich(flaws).sorted { $0.riskScore > $1.riskScore }
-            packageVulnerabilities[package.name] = enriched
-            if lastAuditDate == nil { lastAuditDate = Date() }
-            saveToDisk()
-            return enriched
+        let apiKey = nvdAPIKey
+        let primaryOutcome = await VulnerabilityFetcher(source: members[0], apiKey: apiKey).fetchAssessed(for: package)
+        record(primaryOutcome, from: members[0], for: package) { _, _ in }
+        await refreshThreatIntel(forPackage: package)
+
+        if members.count > 1 {
+            let secondary = members[1]
+            pendingEnrichment.insert(package.name)
+            Task { [weak self] in
+                let outcome = await VulnerabilityFetcher(source: secondary, apiKey: apiKey).fetchAssessed(for: package)
+                guard let self = self else { return }
+                self.pendingEnrichment.remove(package.name)
+                self.record(outcome, from: secondary, for: package) { _, _ in }
+                await self.refreshThreatIntel(forPackage: package)
+            }
         }
+
         if lastAuditDate == nil { lastAuditDate = Date() }
         saveToDisk()
         return packageVulnerabilities[package.name] ?? []
+    }
+
+    private func refreshThreatIntel(forPackage package: BrewPackage) async {
+        guard let flaws = packageVulnerabilities[package.name], !flaws.isEmpty else { return }
+        await ThreatIntelService.shared.fetchEPSS(for: flaws.map { $0.id })
+        packageVulnerabilities[package.name] = ThreatIntelService.shared.enrich(flaws).sorted { $0.riskScore > $1.riskScore }
+        saveToDisk()
     }
 
     private func store(_ vulnerabilities: [CVEVulnerability], for package: BrewPackage) {
@@ -279,16 +504,17 @@ public class CVESecurityService: ObservableObject {
         scannedVersions[package.name] = package.installedVersion
     }
 
-    private func makeFetcher() -> VulnerabilityFetcher {
-        VulnerabilityFetcher(source: source, apiKey: nvdAPIKey)
-    }
-
     // MARK: - Persistance
     //
     // Un audit complet coûte plusieurs minutes de requêtes : le perdre à chaque fermeture
     // de l'application le rendrait inutilisable maintenant qu'il est déclenché à la main.
 
+    /// Bump whenever the matching / version logic changes: verdicts computed by an older engine
+    /// would otherwise survive in the cache and keep showing the old (wrong) results.
+    private static let engineVersion = 3
+
     private struct AuditSnapshot: Codable {
+        var engine: Int? = nil
         let source: String
         let date: Date
         let versions: [String: String]
@@ -302,7 +528,8 @@ public class CVESecurityService: ObservableObject {
             try? FileManager.default.removeItem(at: url)
             return
         }
-        let snapshot = AuditSnapshot(source: source.rawValue,
+        let snapshot = AuditSnapshot(engine: Self.engineVersion,
+                                     source: source.rawValue,
                                      date: date,
                                      versions: scannedVersions,
                                      vulnerabilities: packageVulnerabilities,
@@ -316,7 +543,8 @@ public class CVESecurityService: ObservableObject {
               let data = try? Data(contentsOf: url),
               let snapshot = try? JSONDecoder().decode(AuditSnapshot.self, from: data),
               // Un audit mené contre une autre base n'est pas comparable au réglage courant.
-              snapshot.source == source.rawValue else { return }
+              snapshot.source == source.rawValue,
+              snapshot.engine == Self.engineVersion else { return }
         scannedVersions = snapshot.versions
         packageVulnerabilities = snapshot.vulnerabilities
         untrackedPackages = Set(snapshot.untracked)
@@ -325,18 +553,23 @@ public class CVESecurityService: ObservableObject {
 
     // MARK: - Tri et dédoublonnage des avis
 
-    /// Écarte ce que la version installée corrige déjà, puis ordonne du plus récent au
-    /// plus ancien (la sévérité ne départage que les entrées du même jour).
+    /// Recoupe les relevés d'une même faille (une base peut la citer deux fois, deux bases
+    /// la citer chacune), écarte ce que la version installée corrige déjà, puis ordonne du
+    /// plus récent au plus ancien (la sévérité ne départage que les entrées du même jour).
+    ///
+    /// Le recoupement précède le filtre : si la NVD établit que la version est corrigée alors
+    /// que le texte libre d'EUVD la dit touchée, c'est le verdict le plus fiable qui compte.
     public nonisolated static func openFlawsNewestFirst(_ assessed: [CVEVulnerability]) -> [CVEVulnerability] {
-        var deduplicated: [String: CVEVulnerability] = [:]
-        for vulnerability in assessed where vulnerability.isStillOpen() {
-            // La même faille peut apparaître deux fois (identifiant CVE et alias de base) ;
-            // on garde la plus sévère.
-            if let existing = deduplicated[vulnerability.id], existing.severity >= vulnerability.severity { continue }
-            deduplicated[vulnerability.id] = vulnerability
+        var merged: [String: CVEVulnerability] = [:]
+        for vulnerability in assessed {
+            if let existing = merged[vulnerability.id] {
+                merged[vulnerability.id] = existing.merged(with: vulnerability)
+            } else {
+                merged[vulnerability.id] = vulnerability
+            }
         }
 
-        return deduplicated.values.sorted { lhs, rhs in
+        return merged.values.filter { $0.isStillOpen() }.sorted { lhs, rhs in
             if lhs.sortDate != rhs.sortDate { return lhs.sortDate > rhs.sortDate }
             if lhs.severity != rhs.severity { return lhs.severity > rhs.severity }
             return lhs.id > rhs.id
@@ -364,16 +597,18 @@ public struct VulnerabilityFetcher: Sendable {
         source.maxConcurrentRequests(hasAPIKey: !apiKey.isEmpty)
     }
 
-    public func fetch(for package: BrewPackage) async -> ScanOutcome {
+    public func fetchAssessed(for package: BrewPackage) async -> SourceOutcome {
         switch source {
         case .nvd: return await fetchNVD(for: package)
-        case .euvd: return await fetchEUVD(for: package)
+        case .euvd, .hybrid: return await fetchEUVD(for: package)
         }
     }
 
     /// Nom du produit tel que les bases le désignent : sans suffixe de branche Homebrew.
     private func productName(for package: BrewPackage) -> String {
-        let base = package.fullName.components(separatedBy: "@").first ?? package.fullName
+        // A tap formula is "user/tap/name": only the last component names the software.
+        let leaf = package.fullName.split(separator: "/").last.map(String.init) ?? package.fullName
+        let base = leaf.components(separatedBy: "@").first ?? leaf
         return base.lowercased()
     }
 
@@ -389,7 +624,7 @@ public struct VulnerabilityFetcher: Sendable {
 
     private static let pageSize = 200
 
-    private func fetchNVD(for package: BrewPackage) async -> ScanOutcome {
+    private func fetchNVD(for package: BrewPackage) async -> SourceOutcome {
         let product = productName(for: package)
         guard let encodedProduct = product.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
             return .notTracked
@@ -435,10 +670,10 @@ public struct VulnerabilityFetcher: Sendable {
                 return .notTracked
             }
             items = response.vulnerabilities ?? []
-            if items.isEmpty { return .found([]) }
+            if items.isEmpty { return .assessed([]) }
         }
 
-        return .found(CVESecurityService.openFlawsNewestFirst(items.compactMap { $0.cve?.assess(for: package) }))
+        return .assessed(items.compactMap { $0.cve?.assess(for: package) })
     }
 
     /// Nom du produit dans le dictionnaire CPE de NIST. Le nom d'une formule Homebrew ne
@@ -469,24 +704,45 @@ public struct VulnerabilityFetcher: Sendable {
 
     // MARK: EUVD
 
-    private func fetchEUVD(for package: BrewPackage) async -> ScanOutcome {
+    /// `product=` is a fuzzy search served 100 at a time and in no useful order: the first
+    /// page alone missed most advisories (curl: 50 of 163, nginx: none of its 11 relevant ones,
+    /// OpenSSL 3.0.1: all 67), so every page is read.
+    private static let euvdPageSize = 100
+    private static let euvdMaxPages = 25
+
+    private func fetchEUVD(for package: BrewPackage) async -> SourceOutcome {
         let product = productName(for: package)
         guard let encoded = product.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return .notTracked
         }
         // `product=` cible les produits déclarés par l'avis ; `text=` noierait une formule
         // comme « node » sous les CVE noyau qui emploient le mot.
-        let urlString = "https://euvdservices.enisa.europa.eu/api/search?product=\(encoded)&size=50"
+        var collected: [EUVDItem] = []
+        var total = 0
 
-        switch await request(EUVDSearchResponse.self, urlString: urlString) {
-        case .failure(let reason):
-            return .failed(reason)
-        case .success(let response):
-            guard let items = response.items, !items.isEmpty else {
-                return (response.total ?? 0) == 0 ? .notTracked : .found([])
+        for page in 0..<Self.euvdMaxPages {
+            let urlString = "https://euvdservices.enisa.europa.eu/api/search?product=\(encoded)&size=\(Self.euvdPageSize)&page=\(page)"
+            switch await request(EUVDSearchResponse.self, urlString: urlString) {
+            case .failure(let reason):
+                // A half-read catalogue must not be reported as « aucune faille ».
+                return .failed(page == 0 ? reason : "Lecture EUVD incomplète : \(reason)")
+            case .success(let response):
+                total = response.total ?? total
+                let items = response.items ?? []
+                collected.append(contentsOf: items)
+                if items.isEmpty || collected.count >= total { break }
             }
-            return .found(CVESecurityService.openFlawsNewestFirst(items.compactMap { $0.assess(for: package) }))
+            if collected.count >= total { break }
         }
+
+        guard total > 0 else { return .notTracked }
+
+        // Every advisory the database returned for a *different* software (xz -> "xzs-mysql")
+        // is noise: when none of them concerns this package, EUVD does not track it, which is
+        // not the same thing as « aucune faille ».
+        let assessed = collected.compactMap { $0.assess(for: package) }
+        guard !assessed.isEmpty else { return .notTracked }
+        return .assessed(assessed)
     }
 
     // MARK: Transport

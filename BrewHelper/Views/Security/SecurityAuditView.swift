@@ -123,6 +123,25 @@ struct AuditControlPanel: View {
                     }
                 }
 
+                if security.isEnriching {
+                    VStack(alignment: .leading, spacing: 4) {
+                        ProgressView(value: Double(security.enrichedCount), total: Double(max(security.totalToEnrich, 1)))
+                            .tint(.purple)
+                        HStack(spacing: 6) {
+                            Text("Complément \(security.source.members.last?.shortLabel ?? "") en arrière-plan : \(security.enrichedCount) / \(security.totalToEnrich)")
+                            if !security.currentEnrichmentPackage.isEmpty {
+                                Text("— \(security.currentEnrichmentPackage)")
+                            }
+                            if security.enrichmentFailures > 0 {
+                                Text("· \(security.enrichmentFailures) non interrogé(s)")
+                                    .foregroundColor(.orange)
+                            }
+                        }
+                        .font(DesignSystem.Typography.monospace)
+                        .foregroundColor(.secondary)
+                    }
+                }
+
                 sourceRow
 
                 if security.hasAuditResults || security.isScanning {
@@ -134,6 +153,9 @@ struct AuditControlPanel: View {
 
     private var statusLine: String {
         if security.isScanning { return "Audit en cours — les paquets sont interrogés en parallèle." }
+        if security.isEnriching {
+            return "Audit \(security.source.members.first?.shortLabel ?? "") terminé — \(security.source.members.last?.shortLabel ?? "") complète les résultats en arrière-plan."
+        }
         guard let date = security.lastAuditDate else {
             return "Aucun audit effectué. L'analyse interroge une base distante paquet par paquet : elle se lance à la demande."
         }
@@ -143,11 +165,12 @@ struct AuditControlPanel: View {
     @ViewBuilder
     private var controls: some View {
         HStack(spacing: 10) {
-            if security.isScanning {
+            if security.isScanning || security.isEnriching {
                 Button(role: .cancel) {
                     security.cancelAudit()
                 } label: {
-                    Label("Interrompre", systemImage: "stop.circle.fill")
+                    Label(security.isScanning ? "Interrompre" : "Interrompre le complément",
+                          systemImage: "stop.circle.fill")
                 }
                 .buttonStyle(.bordered)
             } else {
@@ -187,8 +210,8 @@ struct AuditControlPanel: View {
             }
             .labelsHidden()
             .pickerStyle(.segmented)
-            .frame(width: 150)
-            .disabled(security.isScanning)
+            .frame(width: 270)
+            .disabled(security.isScanning || security.isEnriching)
 
             Text(security.source.coverageNote)
                 .font(.system(size: 11))
@@ -360,6 +383,12 @@ struct AuditPackageRow: View {
                     .foregroundColor(.secondary)
             }
             Spacer()
+            if security.pendingEnrichment.contains(package.name) {
+                Image(systemName: "hourglass")
+                    .font(.system(size: 10))
+                    .foregroundColor(.purple)
+                    .help("Complément NVD en attente : ce verdict peut encore s'étoffer")
+            }
             statusBadge
         }
     }

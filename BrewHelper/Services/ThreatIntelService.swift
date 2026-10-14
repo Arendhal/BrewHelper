@@ -114,9 +114,11 @@ public final class ThreatIntelService: ObservableObject {
     public func enrich(_ vulnerabilities: [CVEVulnerability]) -> [CVEVulnerability] {
         vulnerabilities.map { flaw in
             var enriched = flaw
-            enriched.isKnownExploited = knownExploited[flaw.id] != nil
+            // What the source database already said (EUVD's own flag and EPSS) is kept when
+            // KEV / FIRST.org have nothing to add.
+            enriched.isKnownExploited = flaw.isKnownExploited || knownExploited[flaw.id] != nil
             enriched.usedByRansomware = knownExploited[flaw.id]?.knownRansomwareCampaignUse?.lowercased() == "known"
-            enriched.epssScore = epssScores[flaw.id]
+            enriched.epssScore = epssScores[flaw.id] ?? flaw.epssScore
             return enriched
         }
     }

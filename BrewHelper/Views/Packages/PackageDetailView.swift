@@ -233,7 +233,9 @@ struct PackageSecuritySection: View {
             } else if security.untrackedPackages.contains(package.name) {
                 verdictCard(icon: "questionmark.circle.fill", color: .secondary,
                             title: "Produit absent de la base \(security.source.shortLabel)",
-                            message: "La base interrogée ne suit pas ce logiciel : l'absence de résultat n'y prouve rien. Essayez l'autre base depuis l'onglet Audit de Sécurité.")
+                            message: security.source == .hybrid
+                                ? "Ni EUVD ni la NVD ne suivent ce logiciel sous ce nom : l'absence de résultat n'y prouve rien."
+                                : "La base interrogée ne suit pas ce logiciel : l'absence de résultat n'y prouve rien. Essayez une autre base depuis l'onglet Audit de Sécurité.")
             } else if vulnerabilities.isEmpty {
                 verdictCard(icon: "checkmark.shield.fill", color: .green,
                             title: "Aucune faille non corrigée pour la version installée",
@@ -257,10 +259,16 @@ struct PackageSecuritySection: View {
             Spacer()
             if isChecking {
                 ProgressView().controlSize(.small)
-                Text("Interrogation de \(security.source.shortLabel)...")
+                Text("Interrogation de \(security.source.members.first?.shortLabel ?? "")...")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             } else {
+                if security.pendingEnrichment.contains(package.name) {
+                    ProgressView().controlSize(.small)
+                    Text("\(security.source.members.last?.shortLabel ?? "") complète le résultat...")
+                        .font(.system(size: 11))
+                        .foregroundColor(.purple)
+                }
                 Button(hasVerdict ? "Revérifier ce paquet" : "Analyser ce paquet") {
                     Task {
                         isChecking = true
@@ -363,17 +371,51 @@ struct VulnerabilityCard: View {
                     .font(DesignSystem.Typography.body)
                     .fixedSize(horizontal: false, vertical: true)
 
-                HStack {
-                    Spacer()
-                    Button("Consulter le rapport officiel \(vulnerability.sourceLabel) →") {
-                        if let reference = vulnerability.referenceURL, let url = URL(string: reference) {
-                            openURL(url)
-                        }
+                // Quelle base a relevé la faille, et la page officielle de chacune.
+                HStack(spacing: 8) {
+                    Label("Relevée par", systemImage: "externaldrive.connected.to.line.below")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                    ForEach(vulnerability.references, id: \.source) { reference in
+                        SourceTag(reference: reference)
                     }
-                    .buttonStyle(.link)
-                    .font(.system(size: 12, weight: .bold))
+                    Spacer()
                 }
             }
         }
+    }
+}
+
+/// Étiquette cliquable d'une base : ouvre la page officielle de la faille chez elle.
+struct SourceTag: View {
+    @Environment(\.openURL) var openURL
+    let reference: VulnReference
+
+    private var color: Color {
+        switch reference.source {
+        case "EUVD": return .blue
+        case "NVD": return .purple
+        default: return .gray
+        }
+    }
+
+    var body: some View {
+        Button {
+            if let url = URL(string: reference.url) { openURL(url) }
+        } label: {
+            HStack(spacing: 4) {
+                Text(reference.source)
+                    .font(.system(size: 11, weight: .bold))
+                Image(systemName: "arrow.up.right.square")
+                    .font(.system(size: 10))
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(color.opacity(0.15))
+            .foregroundColor(color)
+            .cornerRadius(6)
+        }
+        .buttonStyle(.plain)
+        .help("Ouvrir la page \(reference.source) de cette faille : \(reference.url)")
     }
 }
