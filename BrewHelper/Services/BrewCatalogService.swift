@@ -68,43 +68,66 @@ public class BrewCatalogService: @unchecked Sendable {
         let trimmed = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !trimmed.isEmpty else { return [] }
         
-        // 1. Search names via 'brew search'
-        let result = try await BrewCommandService.shared.runSynchronous(arguments: ["search", trimmed])
-        guard let output = String(data: result.data, encoding: .utf8), !output.isEmpty else {
-            return []
+        // 1. Search formulae and casks separately so casks are never starved by the formulae
+        //    that 'brew search' prints first (the old code kept the first 15 names of the merged output).
+        async let formulaeNames = searchNames(query: trimmed, flag: "--formulae")
+        async let caskNames = searchNames(query: trimmed, flag: "--casks")
+        let (formulae, casks) = try await (formulaeNames, caskNames)
+        
+        // 2. Rank (exact > prefix > contains) before truncating so the best matches always survive
+        func rank(_ name: String) -> Int {
+            let short = name.split(separator: "/").last.map(String.init) ?? name
+            if short == trimmed { return 0 }
+            if short.hasPrefix(trimmed) { return 1 }
+            return 2
         }
+        let ranked = (formulae.map { ($0, false) } + casks.map { ($0, true) })
+            .enumerated()
+            .sorted { (rank($0.element.0), $0.offset) < (rank($1.element.0), $1.offset) }
+            .map(\.element)
+            .prefix(20)
         
-        let lines = output.components(separatedBy: .newlines).filter { line in
-            !line.isEmpty && !line.hasPrefix("==>") && !line.hasPrefix("Warning:") && !line.hasPrefix("If you meant")
+        let formulaNames = ranked.filter { !$0.1 }.map(\.0)
+        let caskTokens = ranked.filter { $0.1 }.map(\.0)
+        
+        // 3. Fetch metadata (tap-qualified names such as user/tap/cask are accepted by 'brew info')
+        async let formulaPkgs = fetchInfo(names: formulaNames, flag: "--formula")
+        async let caskPkgs = fetchInfo(names: caskTokens, flag: "--cask")
+        let results = try await formulaPkgs + caskPkgs
+        
+        return results.sorted {
+            let (r0, r1) = (rank($0.fullName), rank($1.fullName))
+            return r0 != r1 ? r0 < r1 : $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending
         }
-        
-        // Limit to top 15 matches to ensure snappy performance
-        let topNames = Array(lines.prefix(15))
-        guard !topNames.isEmpty else { return [] }
-        
-        // 2. Fetch full metadata in one batch command via 'brew info --json=v2'
-        var infoArgs = ["info", "--json=v2"]
-        infoArgs.append(contentsOf: topNames)
-        
-        let infoResult = try await BrewCommandService.shared.runSynchronous(arguments: infoArgs)
-        let cleanJSON = BrewCommandService.shared.extractCleanJSONData(from: infoResult.data)
-        
-        guard let decoded = try? JSONDecoder().decode(BrewJSONResponseV2.self, from: cleanJSON) else {
-            return []
+    }
+    
+    private func searchNames(query: String, flag: String) async throws -> [String] {
+        let result = try await BrewCommandService.shared.runSynchronous(arguments: ["search", flag, query])
+        guard let output = String(data: result.data, encoding: .utf8) else { return [] }
+        return output.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty && !$0.hasPrefix("==>") && !$0.hasPrefix("Warning:") && !$0.hasPrefix("Error:") && !$0.hasPrefix("If you meant") }
+    }
+    
+    /// Batch lookup; if one name makes `brew info` fail (which would drop the whole batch), retry name by name.
+    private func fetchInfo(names: [String], flag: String) async throws -> [BrewPackage] {
+        guard !names.isEmpty else { return [] }
+        if let batch = try await runInfo(names: names, flag: flag), !batch.isEmpty { return batch }
+        guard names.count > 1 else { return [] }
+        return await withTaskGroup(of: [BrewPackage].self) { group in
+            for name in names {
+                group.addTask { (try? await self.runInfo(names: [name], flag: flag)) ?? [] }
+            }
+            var all: [BrewPackage] = []
+            for await pkgs in group { all.append(contentsOf: pkgs) }
+            return all
         }
-        
-        var results: [BrewPackage] = []
-        
-        for f in decoded.formulae {
-            let pkg = f.toBrewPackage(outdatedList: [])
-            results.append(pkg)
-        }
-        
-        for c in decoded.casks {
-            let pkg = c.toBrewPackage(outdatedList: [])
-            results.append(pkg)
-        }
-        
-        return results.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+    
+    private func runInfo(names: [String], flag: String) async throws -> [BrewPackage]? {
+        let result = try await BrewCommandService.shared.runSynchronous(arguments: ["info", "--json=v2", flag] + names)
+        let clean = BrewCommandService.shared.extractCleanJSONData(from: result.data)
+        guard let decoded = try? JSONDecoder().decode(BrewJSONResponseV2.self, from: clean) else { return nil }
+        return decoded.formulae.map { $0.toBrewPackage(outdatedList: []) } + decoded.casks.map { $0.toBrewPackage(outdatedList: []) }
     }
 }

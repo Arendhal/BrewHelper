@@ -9,6 +9,7 @@ public struct DiscoverCatalogView: View {
     @State private var isSearching: Bool = false
     @State private var selectedPackage: BrewPackage? = nil
     @State private var errorMessage: String? = nil
+    @State private var searchTask: Task<Void, Never>? = nil
     
     public init() {}
     
@@ -61,10 +62,10 @@ public struct DiscoverCatalogView: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                     } else if searchResults.isEmpty {
                         VStack(spacing: 14) {
-                            Image(systemName: "magnifyingglass")
+                            Image(systemName: errorMessage == nil ? "magnifyingglass" : "exclamationmark.triangle")
                                 .font(.system(size: 40))
                                 .foregroundColor(.secondary)
-                            Text("Aucun paquet correspondant pour \"\(searchText)\".")
+                            Text(errorMessage ?? "Aucun paquet correspondant pour \"\(searchText)\".")
                                 .font(DesignSystem.Typography.body)
                                 .foregroundColor(.secondary)
                         }
@@ -135,21 +136,21 @@ public struct DiscoverCatalogView: View {
         errorMessage = nil
         
         let query = searchText
-        Task {
+        searchTask?.cancel()
+        searchTask = Task {
             do {
                 let results = try await BrewCatalogService.shared.searchGlobalPackages(query: query)
-                if self.searchText == query {
-                    self.searchResults = results
-                    self.isSearching = false
-                    if self.selectedPackage == nil {
-                        self.selectedPackage = results.first
-                    }
+                guard !Task.isCancelled, self.searchText == query else { return }
+                self.searchResults = results
+                self.isSearching = false
+                if self.selectedPackage == nil {
+                    self.selectedPackage = results.first
                 }
             } catch {
-                if self.searchText == query {
-                    self.errorMessage = error.localizedDescription
-                    self.isSearching = false
-                }
+                guard !Task.isCancelled, self.searchText == query else { return }
+                self.searchResults = []
+                self.errorMessage = error.localizedDescription
+                self.isSearching = false
             }
         }
     }
