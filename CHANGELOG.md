@@ -1,5 +1,57 @@
 # Journal des versions
 
+## 1.4.1 — Rattachement des avis au bon logiciel, et clé NVD vérifiée
+
+Un avis n'est plus retenu parce que son nom ressemble à celui du paquet : chaque
+rapprochement est confronté à plusieurs indices, et ce qui est écarté se justifie.
+
+### Vérification d'identité des avis
+
+- **Déclencheur : `python@3.14` remontait des failles « 2020.5.0 ».** C'étaient celles de
+  l'extension Python de Visual Studio Code, que la NVD publie sous le produit `python`
+  (éditeur Microsoft, numérotation par année). Comparée à `3.14.8`, une borne `< 2020.5.0`
+  paraît toujours supérieure : le paquet semblait vulnérable.
+- **Chaque produit déclaré par un avis est confronté au paquet** (`ProductIdentity.swift`) :
+  nom (identique, voisin, adresse du dépôt, ou lu dans une phrase), éditeur (cohérent avec
+  le nom du paquet ou le site du projet), site officiel cité dans les références de l'avis,
+  plateforme visée (`target_sw` d'un CPE : Windows, Android, extension d'une application
+  hôte), schéma de version (numérotation par année contre numérotation classique).
+  L'adresse source de l'archive (`urls.stable.url`) s'ajoute à la page d'accueil pour
+  reconnaître le projet amont.
+- **Un score et des raisons lisibles** : sur chaque faille, un badge « Produit de l'avis :
+  python (éditeur python) — correspondance forte », dont le survol détaille les indices.
+- **Les avis écartés sont listés avec leur motif**, dans une section repliable de la fiche du
+  paquet : extension de Visual Studio Code, faille propre à Windows, homonyme sans version.
+- **Contrôle hors ligne** : `Tools/check-identity.sh` rejoue 21 cas réels (Python et son
+  extension, `gettext.js`, `NGINX Plus`, `Zoom Node`, un avis propre à Windows...).
+
+### Autres fausses détections corrigées
+
+- `gettext` remontait une faille de `gettext.js`, un portage JavaScript : le suffixe « .js »
+  ne vaut plus que pour Node.js.
+- `bitwarden-cli 2026.9.1` : une version calendaire était prise pour une date et jugée
+  incomparable avec `2026.4.0`. Une date s'écrit avec des tirets ou un mois sur deux chiffres.
+- `deno` : une faille propre à Windows s'affichait sur macOS.
+- **NVD : « non suivi » à tort.** Quand le dictionnaire de NIST connaît le produit mais
+  qu'aucune faille ne vise la version installée, l'audit répondait « non suivi » au lieu de
+  « sain » (`xz`, `c-ares`, `libidn2`, `opus`...). Les paquets « non suivis » passent de 47 à
+  31 sur une installation type. Une requête de repli refusée est maintenant un échec visible.
+
+### Clé d'API NVD
+
+- La clé est **nettoyée** avant envoi : un espace ou un retour à la ligne collé avec elle
+  la faisait refuser comme une clé fausse.
+- Une clé refusée affiche **« Clé d'API NVD refusée par NIST »** au lieu de « code 404 », sans
+  nouvelle tentative inutile.
+- Bouton **« Tester la clé »** : interroge réellement la NVD et répond *acceptée*, *refusée*
+  ou *injoignable*.
+
+### Limites connues
+
+- Les paquets dont le nom Homebrew diffère de celui des bases (`webp` pour `libwebp`,
+  `icu4c`, `tcl-tk`, `sdl3`) restent « non suivis » : une table d'alias est à l'étude.
+- Les avis identifiés seulement par un commit restent « non vérifiables ».
+
 ## 1.4 — Audit hybride EUVD + NVD, et un moteur de verdicts corrigé
 
 Le principe reste celui de la 1.3 : **ne jamais afficher en vert ce qui n'a pas été

@@ -56,7 +56,7 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 ### Option 1 : Via l'Installateur macOS (DMG)
 L'installateur publié avec chaque version contient un **binaire universel**, exécutable
 nativement sur Apple Silicon comme sur Intel :
-1. Téléchargez `BrewHelper-1.4-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
+1. Téléchargez `BrewHelper-1.4.1-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
 2. Ouvrez-le et glissez l'icône **BrewHelper** dans votre dossier *Applications*.
 3. Lancez l'application.
 
@@ -88,6 +88,7 @@ lipo -archs build/Build/Products/Release/BrewHelper.app/Contents/MacOS/BrewHelpe
 * **`BrewCommandService.swift`** : Pont de communication sécurisé exécutant les processus natifs macOS (`Process`, `Pipe`) avec lecture de flux d'entrées/sorties en continu.
 * **`BrewCatalogService.swift`** : Catalogue de recommandations et moteur de recherche global connectant l'App Store Homebrew en JSON v2.
 * **`CVESecurityService.swift`** : Orchestration de l'audit — une file par base (EUVD en première ligne, NVD en renfort), recoupement des verdicts, temporisation par quota, reprises sur échec, cache disque et distinction sain / non répertorié / échec.
+* **`ProductIdentity.swift`** : Vérification d'identité des avis — nom, éditeur, plateforme visée, schéma de version et références, avec un score et des raisons affichables. `Tools/check-identity.sh` en rejoue les cas de régression hors ligne.
 * **`VulnerabilityMatcher.swift`** : Comparaison de versions et interprétation des plages affectées (CPE structuré côté NVD, texte libre côté EUVD), correspondance produit/paquet.
 * **`ThreatIntelService.swift`** : Catalogue CISA KEV et scores EPSS, qui déterminent l'ordre de traitement des failles.
 * **`RemediationService.swift`** : Construction du plan de remédiation à partir de `versioned_formulae`, `deprecated`/`disabled` et `brew uses --installed`.
