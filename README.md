@@ -14,9 +14,9 @@
 * **Fiches techniques détaillées** : Accédez au détail de chaque logiciel en un clic — versions locales et distantes, arborescence des dépendances, licences officielles, description et liens directs vers la documentation de l'éditeur.
 * **Détection fine des versions** : Un algorithme scrute localement tous vos répertoires de version (via *Cellar* et *Caskroom*) pour éliminer tout faux positif et vous indiquer avec précision si vous êtes à jour.
 
-### 2. 🛡️ Audit de Sécurité à la Demande (NVD/NIST · EUVD/ENISA · CISA KEV · EPSS)
+### 2. 🛡️ Audit de Sécurité à la Demande (EUVD/ENISA + NVD/NIST · CISA KEV · EPSS)
 * **Déclenché quand vous le décidez** : le lancement de l'application se contente d'un `brew update` — l'état « mises à jour disponibles » est donc toujours exact. L'audit de vulnérabilités, lui, interroge une base distante paquet par paquet : il se lance depuis l'onglet *Audit de Sécurité* et son résultat est conservé d'une session à l'autre.
-* **Deux bases au choix** : **NVD** (NIST) par recoupement CPE — le nom du produit et la version installée sont envoyés à NIST, qui fait lui-même le calcul de plage — ou **EUVD** (ENISA) par produit déclaré. Le nom Homebrew est réconcilié avec le dictionnaire CPE quand il diffère (`node` → `nodejs`).
+* **Audit hybride EUVD + NVD** : **EUVD** (ENISA, par produit déclaré) porte l'audit et la **NVD** (NIST, par recoupement CPE — le nom du produit et la version installée sont envoyés à NIST, qui fait lui-même le calcul de plage) le complète en parallèle, sur sa propre file, sans jamais le ralentir. Chaque faille indique la base qui l'a relevée, avec un lien cliquable vers sa page officielle. Les modes EUVD seul et NVD seul restent disponibles. Le nom Homebrew est réconcilié avec le dictionnaire CPE quand il diffère (`node` → `nodejs`).
 * **Verdict par version installée** : chaque avis est recroisé avec la version présente sur le disque. Ce que votre version corrige déjà n'apparaît pas ; les plages exprimées dans un autre schéma (dates d'instantané, empreintes de commit) sont écartées au lieu d'être prises pour des numéros de version.
 * **Priorisation par le risque réel** : les failles inscrites au catalogue **CISA KEV** (exploitation avérée sur le terrain) passent devant tout le reste, et le score **EPSS** donne la probabilité d'exploitation à trente jours. Un score CVSS élevé que personne n'exploite ne masque plus une faille moyenne activement utilisée.
 * **Trois états distincts, jamais confondus** : *sain*, *produit non répertorié par la base* et *interrogation échouée*. Un quota d'API dépassé ne s'affiche plus comme un badge vert.
@@ -56,7 +56,7 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 ### Option 1 : Via l'Installateur macOS (DMG)
 L'installateur publié avec chaque version contient un **binaire universel**, exécutable
 nativement sur Apple Silicon comme sur Intel :
-1. Téléchargez `BrewHelper-1.3-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
+1. Téléchargez `BrewHelper-1.4-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
 2. Ouvrez-le et glissez l'icône **BrewHelper** dans votre dossier *Applications*.
 3. Lancez l'application.
 
@@ -87,8 +87,8 @@ lipo -archs build/Build/Products/Release/BrewHelper.app/Contents/MacOS/BrewHelpe
 * **`AppState.swift`** : Chef d'orchestre de l'interface graphique et gestionnaire asynchrone des tâches d'arrière-plan.
 * **`BrewCommandService.swift`** : Pont de communication sécurisé exécutant les processus natifs macOS (`Process`, `Pipe`) avec lecture de flux d'entrées/sorties en continu.
 * **`BrewCatalogService.swift`** : Catalogue de recommandations et moteur de recherche global connectant l'App Store Homebrew en JSON v2.
-* **`CVESecurityService.swift`** : Orchestration de l'audit — interrogation parallèle, temporisation par quota, reprises sur échec, cache disque et distinction sain / non répertorié / échec.
-* **`VulnerabilityMatcher.swift`** : Comparaison de versions et interprétation des plages affectées (CPE structuré côté NVD, texte libre côté EUVD).
+* **`CVESecurityService.swift`** : Orchestration de l'audit — une file par base (EUVD en première ligne, NVD en renfort), recoupement des verdicts, temporisation par quota, reprises sur échec, cache disque et distinction sain / non répertorié / échec.
+* **`VulnerabilityMatcher.swift`** : Comparaison de versions et interprétation des plages affectées (CPE structuré côté NVD, texte libre côté EUVD), correspondance produit/paquet.
 * **`ThreatIntelService.swift`** : Catalogue CISA KEV et scores EPSS, qui déterminent l'ordre de traitement des failles.
 * **`RemediationService.swift`** : Construction du plan de remédiation à partir de `versioned_formulae`, `deprecated`/`disabled` et `brew uses --installed`.
 * **`Views/`** : Interface 100 % SwiftUI modulable avec effets d'animation *macOS Sonoma / Sequoia*.

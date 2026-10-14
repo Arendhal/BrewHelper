@@ -1,5 +1,76 @@
 # Journal des versions
 
+## 1.4 — Audit hybride EUVD + NVD, et un moteur de verdicts corrigé
+
+Le principe reste celui de la 1.3 : **ne jamais afficher en vert ce qui n'a pas été
+vérifié**. Cette version l'applique à ce qui restait faux dans la lecture d'EUVD, et
+ajoute la NVD en renfort plutôt qu'en alternative.
+
+### Audit hybride : EUVD porte l'audit, la NVD le complète
+
+- **Nouvelle base par défaut, « EUVD + NVD »** (les modes EUVD seul et NVD seul restent
+  au choix, et un réglage déjà enregistré est conservé).
+- **Deux files indépendantes.** EUVD, rapide, avance à son rythme ; la NVD, bridée à
+  5 requêtes par 30 s sans clé, travaille en parallèle sur sa propre file, avec sa propre
+  cadence. Une base lente ne ralentit jamais l'autre.
+- **La NVD commence par les paquets qu'EUVD ne connaît pas** (ou n'a pas pu lire) : c'est
+  là qu'elle apporte le plus. `xz 5.6.1` est « non suivi » côté EUVD, alors que la NVD lui
+  relève des failles ouvertes.
+- **Chaque faille indique la base qui l'a relevée**, avec une étiquette cliquable par base
+  (EUVD, NVD) qui ouvre la page officielle. Une faille vue par les deux n'apparaît qu'une
+  fois, avec les deux références.
+- **Recoupement des verdicts** : quand les bases divergent, la plage structurée de la NVD
+  l'emporte sur une plage lue dans le texte libre d'EUVD, qui l'emporte sur « non
+  vérifiable ». Une base en panne ne masque pas ce que l'autre a trouvé.
+- **Progression séparée** pour le complément (« Complément NVD en arrière-plan : x / y »),
+  sablier sur les paquets dont le verdict peut encore s'étoffer, et bouton *Interrompre le
+  complément* une fois la phase EUVD terminée.
+
+### Lecture d'EUVD corrigée
+
+Constaté sur l'API réelle, en rejouant le moteur de verdicts sur des paquets installés :
+
+- **EUVD pagine par 100 et ne trie pas** : seule la première page était lue. curl : 50
+  avis sur 163 ; OpenSSL 3.0.1 : 0 faille détectée sur les 67 réelles ; nginx 1.20 : 0 sur
+  2. Toutes les pages sont maintenant lues, et une lecture interrompue passe en erreur au
+  lieu de se faire passer pour un paquet sain.
+- **« Aucun avis rattachable » n'est plus « sain »** : `product=` est une recherche
+  floue (`xz` ramène 3 avis, tous sur `xzs-mysql`). Un paquet dont aucun avis ne le
+  concerne est désormais *non suivi*, pas vert.
+- **Correspondance des noms de produit** : `https://github.com/curl/curl` (51 avis curl)
+  et `NGINX Open Source` (30 avis) étaient ignorés ; `Zoom Node`, `OpenClaw Windows Node`
+  ou `Kubernetes ingress-nginx` étaient pris pour Node.js et nginx (6 fausses failles
+  sur Node 26). La règle « dernier mot du nom » exige maintenant un éditeur connu devant.
+- **Plages de versions lues de travers** : `from 7.59.0 to 7.61.1` perdait sa borne haute
+  (curl 8.x paraissait touché par des failles de 2018) ; `Fixed in 7.83.1` était lu comme
+  une version affectée ; `10.0 <10.*` donnait une plage vide ; `All versions prior to X`
+  devenait « toutes versions » ; les suffixes lettres d'OpenSSL (`1.1.1zh`) étaient perdus
+  et `1.1.1w` passait pour antérieure à `1.1.1`.
+- **EUVD fournit son propre indicateur d'exploitation et son EPSS** : ils sont conservés,
+  KEV et FIRST.org les complètent sans les écraser.
+- **Le cache d'audit porte une version du moteur** : les résultats calculés par un moteur
+  antérieur ne survivent plus à sa correction (le cache est donc recalculé au premier audit
+  de cette version).
+
+### Recherche dans « Découvrir & Installer »
+
+- **Un cask d'un tap tiers est retrouvé** (`macspace` → `1architect/macspace/macspace`). La
+  recherche interroge formules et casks séparément et classe (nom exact, préfixe, reste)
+  *avant* de tronquer ; elle tronquait auparavant les 15 premiers noms de la sortie brute,
+  où les casks venaient après les formules.
+- **Un nom que `brew info` refuse ne vide plus la liste** : la recherche réessaie nom par
+  nom.
+- Les erreurs de recherche sont affichées, et une nouvelle frappe annule la recherche
+  précédente.
+
+### Limites connues
+
+- EUVD ne rattache aucun produit à certains avis (la porte dérobée xz, par exemple) : la
+  recherche par produit ne peut pas les trouver, d'où l'intérêt de la NVD en renfort.
+- Sans clé d'API, la NVD reste lente (plusieurs minutes pour quelques dizaines de paquets).
+  La clé est gratuite.
+- Les numéros de build (`2026.7.1-3`) sont lus sans leur suffixe.
+
 ## 1.3 — Audit de sécurité à la demande, fiable, et suivi d'un plan d'action
 
 Cette version réécrit l'audit de vulnérabilités de bout en bout. Le principe qui la guide :
