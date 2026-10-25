@@ -33,6 +33,7 @@ let wpcli = pkg("wp-cli", "2.12.0", home: "https://wp-cli.org/", desc: "Command-
 let openssl = pkg("openssl@3", "3.5.9", home: "https://openssl-library.org/")
 let ytdlp = pkg("yt-dlp", "2026.8.19_2", home: "https://github.com/yt-dlp/yt-dlp", source: "https://github.com/yt-dlp/yt-dlp/archive/2026.08.19.tar.gz")
 let xz = pkg("xz", "5.6.1", home: "https://tukaani.org/xz/")
+let cacerts = pkg("ca-certificates", "2026-10-20", home: "https://curl.se/docs/caextract.html", source: "https://curl.se/ca/cacert-2026-10-20.pem")
 
 let cases: [Case] = [
     // Python et l'extension Python de Visual Studio Code (éditeur Microsoft, numérotée par année).
@@ -80,7 +81,16 @@ let cases: [Case] = [
          target: nil, versions: "<2.12.1", description: "Flaw in the WordPress plugin installer of wp-cli", references: ["https://wp-cli.org/"], expect: .strong),
     // Produit étranger
     Case(label: "xz / xzs-mysql", package: xz, product: "xzs-mysql 学之思开源考试系统", vendor: "mindskip",
-         target: nil, versions: "3.9.0", description: "Exam system", references: [], expect: .notThis)
+         target: nil, versions: "3.9.0", description: "Exam system", references: [], expect: .notThis),
+    // Nom seulement voisin, éditeur sans lien : Step CA publié sous « certificates »
+    Case(label: "ca-certificates / Step CA (smallstep « certificates »)", package: cacerts, product: "certificates", vendor: "smallstep",
+         target: nil, versions: "< 0.30.0-rc6", description: "Step CA is an online certificate authority for secure, automated certificate management for DevOps.", references: ["https://github.com/smallstep/certificates/security/advisories/1"], expect: .rejected),
+    // Même nom, mais paquet reconditionné par une distribution
+    Case(label: "ca-certificates / paquet Amazon Linux 2", package: cacerts, product: "ca-certificates", vendor: "Amazon",
+         target: nil, versions: "< 2021.2.50-72", description: "The ca-certificates package before ca-certificates-2021.2.50-72 for Amazon Linux 2 (AL2) does not properly remove certain TrustCor root certificates.", references: [], expect: .rejected),
+    // Garde-fou : le même nom chez un éditeur inconnu, sans distribution, reste retenu
+    Case(label: "ca-certificates / même nom, éditeur inconnu sans distribution", package: cacerts, product: "ca-certificates", vendor: "Example Corp",
+         target: nil, versions: "< 2026-01-01", description: "The CA bundle trusts a revoked root.", references: [], expect: .accepted)
 ]
 
 var failures = 0
@@ -113,5 +123,56 @@ let patched = PatchVerdict.assess(ranges: [VersionConstraintParser.parse("2026.4
 if case .patched = patched { print("✓ bitwarden-cli 2026.9.1 est déclaré corrigé face à 2026.4.0") }
 else { failures += 1; print("✗ bitwarden-cli 2026.9.1 devrait être corrigé face à 2026.4.0 (\(patched))") }
 
-print(failures == 0 ? "\nTous les contrôles passent (\(cases.count + 1))." : "\n\(failures) contrôle(s) en échec.")
+// Versions calendaires : le mois écrit « 06 » ou « 10 » ne change pas de schéma.
+var calendarChecks = 0
+for (bound, installed) in [("< 2026.06.09", "2026.10.21"), ("2023.06.21, < 2026.02.21", "2026.10.21")] {
+    calendarChecks += 1
+    let verdict = PatchVerdict.assess(ranges: [VersionConstraintParser.parse(bound)], installed: installed).verdict
+    if case .patched = verdict { print("✓ yt-dlp \(installed) est déclaré corrigé face à « \(bound) »") }
+    else { failures += 1; print("✗ yt-dlp \(installed) devrait être corrigé face à « \(bound) » (\(verdict))") }
+}
+// Garde-fou : une date d'instantané reste étrangère à une numérotation classique.
+calendarChecks += 1
+if !PackageVersion.comparable(PackageVersion("2025-01-13")!, PackageVersion("9.0.1")!) {
+    print("✓ ffmpeg 9.0.1 reste non comparable à la date « 2025-01-13 »")
+} else {
+    failures += 1; print("✗ ffmpeg 9.0.1 ne devrait pas être comparable à la date « 2025-01-13 »")
+}
+
+// Noms amont : ce que l'audit interroge en plus du nom de la formule.
+let webp = pkg("webp", "1.6.0", home: "https://developers.google.com/speed/webp/",
+               source: "https://storage.googleapis.com/downloads.webmproject.org/releases/webp/libwebp-1.6.0.tar.gz")
+let jq = pkg("jq", "1.8.1", home: "https://jqlang.org/", source: "https://github.com/jqlang/jq/releases/download/jq-1.8.1/jq-1.8.1.tar.gz")
+let tagOnly = pkg("foo", "1.0", home: "https://example.org", source: "https://example.org/archive/v1.0.tar.gz")
+let upstreamCases: [(label: String, package: BrewPackage, expected: [String])] = [
+    ("webp -> libwebp (table et archive)", webp, ["libwebp"]),
+    ("python@3.14 : l'archive ne dit rien de plus", python, []),
+    ("curl : le dépôt porte le même nom", curl, []),
+    ("jq : rien de plus que le nom du paquet", jq, []),
+    ("archive réduite à une version", tagOnly, []),
+    ("jpeg-turbo -> libjpeg-turbo", pkg("jpeg-turbo", "3.2.0", home: "https://libjpeg-turbo.org/",
+        source: "https://github.com/libjpeg-turbo/libjpeg-turbo/releases/download/3.2.0/libjpeg-turbo-3.2.0.tar.gz"), ["libjpeg-turbo"]),
+    ("libnghttp2 -> nghttp2", pkg("libnghttp2", "1.70.0", home: "https://nghttp2.org/",
+        source: "https://github.com/nghttp2/nghttp2/releases/download/v1.70.0/nghttp2-1.70.0.tar.gz"), ["nghttp2"]),
+    ("gh : le dépôt « cli » est trop générique", pkg("gh", "2.103.2", home: "https://cli.github.com/",
+        source: "https://github.com/cli/cli/archive/refs/tags/v2.103.2.tar.gz"), []),
+    ("python-tk : « python » est plus large que le paquet", pkg("python-tk@3.14", "3.14.9", home: "https://www.python.org/",
+        source: "https://www.python.org/ftp/python/3.14.9/Python-3.14.9.tgz"), []),
+    ("ada-url : « ada » désigne autre chose", pkg("ada-url", "4.0.0", home: "https://github.com/ada-url/ada",
+        source: "https://github.com/ada-url/ada/archive/refs/tags/v4.0.0.tar.gz"), []),
+    ("sqlite : « -autoconf » n'est qu'un emballage", pkg("sqlite", "3.54.1", home: "https://sqlite.org/",
+        source: "https://www.sqlite.org/2026/sqlite-autoconf-3540100.tar.gz"), []),
+]
+for c in upstreamCases {
+    let got = ProductAliases.upstreamNames(for: c.package)
+    let ok = got == c.expected
+    if !ok { failures += 1 }
+    print("\(ok ? "✓" : "✗") \(c.label)\n    → \(got)")
+}
+let libwebpMatches = ProductNameMatcher.matches(product: "libwebp", package: webp)
+if libwebpMatches { print("✓ « libwebp » est reconnu comme le paquet webp") }
+else { failures += 1; print("✗ « libwebp » devrait être reconnu comme le paquet webp") }
+
+let total = cases.count + 1 + calendarChecks + upstreamCases.count + 1
+print(failures == 0 ? "\nTous les contrôles passent (\(total))." : "\n\(failures) contrôle(s) en échec.")
 exit(failures == 0 ? 0 : 1)

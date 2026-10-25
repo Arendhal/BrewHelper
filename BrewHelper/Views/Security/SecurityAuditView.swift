@@ -10,6 +10,8 @@ public struct SecurityAuditView: View {
 
     @State private var selectedPackage: BrewPackage? = nil
     @State private var searchText: String = ""
+    /// Les groupes rassurants sont repliés : l'œil va d'abord à ce qui demande une action.
+    @State private var collapsed: Set<AuditGroup> = [.clean, .pending]
 
     public init() {}
 
@@ -17,6 +19,14 @@ public struct SecurityAuditView: View {
         appState.packages
             .filter { !searchText.isEmpty ? $0.name.localizedCaseInsensitiveContains(searchText) : true }
             .sorted { security.riskScore(for: $0) > security.riskScore(for: $1) }
+    }
+
+    private var grouped: [(group: AuditGroup, packages: [BrewPackage])] {
+        let all = audited
+        return AuditGroup.allCases.compactMap { group in
+            let members = all.filter { AuditGroup.classify($0, flaws: security.openFlaws(for: $0)) == group }
+            return members.isEmpty ? nil : (group, members)
+        }
     }
 
     public var body: some View {
@@ -37,20 +47,45 @@ public struct SecurityAuditView: View {
             }
         }
         .onChange(of: security.lastAuditDate) {
-            if selectedPackage == nil { selectedPackage = audited.first }
+            if selectedPackage == nil { selectedPackage = grouped.first?.packages.first }
         }
     }
 
     private var auditList: some View {
         VStack(alignment: .leading, spacing: 0) {
-            List(audited, selection: $selectedPackage) { package in
-                AuditPackageRow(package: package)
-                    .tag(package)
-                    .padding(.vertical, 3)
+            List(selection: $selectedPackage) {
+                ForEach(grouped, id: \.group) { entry in
+                    Section(isExpanded: Binding(
+                        get: { !collapsed.contains(entry.group) },
+                        set: { expanded in
+                            if expanded { collapsed.remove(entry.group) } else { collapsed.insert(entry.group) }
+                        })) {
+                        ForEach(entry.packages) { package in
+                            AuditPackageRow(package: package)
+                                .tag(package)
+                                .padding(.vertical, 3)
+                        }
+                    } header: {
+                        VStack(alignment: .leading, spacing: 2) {
+                            HStack(spacing: 6) {
+                                Circle().fill(entry.group.tone.mark).frame(width: 8, height: 8)
+                                Text("\(entry.group.title) — \(entry.packages.count)")
+                                    .font(.system(size: 12, weight: .bold))
+                                    .foregroundColor(Palette.text)
+                            }
+                            Text(entry.group.explanation)
+                                .font(.system(size: 11))
+                                .foregroundColor(Palette.textSecondary)
+                                .textCase(nil)
+                        }
+                        .padding(.vertical, 4)
+                    }
+                }
             }
-            .listStyle(.inset)
+            .listStyle(.sidebar)
+            .scrollContentBackground(.hidden)
         }
-        .frame(minWidth: 300, maxWidth: 360)
+        .frame(minWidth: 320, maxWidth: 380)
         .searchable(text: $searchText, prompt: "Filtrer les paquets audités...")
     }
 
@@ -72,7 +107,7 @@ public struct SecurityAuditView: View {
                     .padding(.horizontal, 40)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
-            .background(Color(NSColor.underPageBackgroundColor).opacity(0.4))
+            .background(Palette.bar)
         }
     }
 }
@@ -98,7 +133,7 @@ struct AuditControlPanel: View {
                 HStack(alignment: .top, spacing: 14) {
                     Image(systemName: "lock.shield.fill")
                         .font(.system(size: 26))
-                        .foregroundColor(security.vulnerableCount > 0 ? .orange : .green)
+                        .foregroundColor(headerColor)
 
                     VStack(alignment: .leading, spacing: 3) {
                         Text("Audit de Sécurité CVE")
@@ -149,6 +184,13 @@ struct AuditControlPanel: View {
                 }
             }
         }
+    }
+
+    /// Vert seulement quand tout a été vérifié : un audit à trous n'est pas un audit sain.
+    private var headerColor: Color {
+        if security.vulnerableCount > 0 { return .orange }
+        let unverified = security.untrackedPackages.count + security.scanFailures.count + security.inconclusiveCount
+        return unverified > 0 ? .yellow : .green
     }
 
     private var statusLine: String {
@@ -310,26 +352,89 @@ struct AuditSummaryTiles: View {
     @EnvironmentObject var appState: AppState
     @ObservedObject private var security: CVESecurityService = .shared
 
-    private var openFlawCount: Int {
-        security.packageVulnerabilities.values.reduce(0) { $0 + $1.count }
+    private var unmaintainedCount: Int {
+        appState.packages.filter { !$0.lifecycle.isMaintained }.count
+    }
+
+    /// Répartition des paquets installés : ce que l'audit a établi, et ce qu'il n'a pas pu établir.
+    private var segments: [(label: String, count: Int, tone: Tone, filter: LibraryFilter)] {
+        var touched = 0, inconclusive = 0, untracked = 0, unknown = 0, clean = 0
+        for package in appState.packages {
+            switch package.cveStatus {
+            case .vulnerable: touched += 1
+            case .inconclusive: inconclusive += 1
+            case .notTracked: untracked += 1
+            case .clean: clean += 1
+            case .error, .unscanned, .scanning: unknown += 1
+            }
+        }
+        return [
+            ("touchés", touched, .danger, .vulnerable),
+            ("non concluants", inconclusive, .warning, .inconclusive),
+            ("non suivis", untracked, .neutral, .untracked),
+            ("sans verdict", unknown, .info, .all),
+            ("sains", clean, .success, .all)
+        ].filter { $0.count > 0 }
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            AuditTile(label: "Paquets vulnérables", value: "\(security.vulnerableCount)",
-                      color: security.vulnerableCount > 0 ? .orange : .green, icon: "shippingbox.fill")
-            AuditTile(label: "Failles ouvertes", value: "\(openFlawCount)",
-                      color: openFlawCount > 0 ? .orange : .green, icon: "exclamationmark.triangle.fill")
-            AuditTile(label: "Exploitation avérée", value: "\(security.knownExploitedCount)",
-                      color: security.knownExploitedCount > 0 ? .red : .green, icon: "flame.fill",
-                      help: "Failles inscrites au catalogue KEV de la CISA : leur exploitation en conditions réelles est documentée.")
-            AuditTile(label: "Non répertoriés", value: "\(security.untrackedPackages.count)",
-                      color: .secondary, icon: "questionmark.circle.fill",
-                      help: "Paquets absents de la base interrogée : l'absence de résultat n'y prouve rien.")
-            AuditTile(label: "Interrogations échouées", value: "\(security.scanFailures.count)",
-                      color: security.scanFailures.isEmpty ? .secondary : .red, icon: "wifi.exclamationmark",
-                      help: "Quota dépassé ou service indisponible : ces paquets n'ont pas été vérifiés.")
+        let parts = segments
+        let clean = parts.first { $0.label == "sains" }?.count ?? 0
+        let others = appState.packages.count - clean
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("\(clean) paquet\(clean > 1 ? "s" : "") vérifié\(clean > 1 ? "s" : "") sain\(clean > 1 ? "s" : "").")
+                    .font(.system(size: 15, weight: .bold))
+                    .foregroundColor(Palette.text)
+                if others > 0 {
+                    Text("Les \(others) autres ne le sont pas, pour des raisons différentes.")
+                        .font(.system(size: 14))
+                        .foregroundColor(Palette.textSecondary)
+                }
+            }
+            GeometryReader { proxy in
+                HStack(spacing: 2) {
+                    ForEach(parts, id: \.label) { part in
+                        Rectangle()
+                            .fill(part.tone.mark)
+                            .frame(width: max(4, (proxy.size.width - CGFloat(parts.count - 1) * 2) * CGFloat(part.count) / CGFloat(max(appState.packages.count, 1))))
+                    }
+                }
+            }
+            .frame(height: 12)
+            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .accessibilityElement()
+            .accessibilityLabel(parts.map { "\($0.count) \($0.label)" }.joined(separator: ", "))
+
+            HStack(spacing: 18) {
+                ForEach(parts, id: \.label) { part in
+                    Button {
+                        if part.filter != .all { appState.showLibrary(part.filter) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            RoundedRectangle(cornerRadius: 3).fill(part.tone.mark).frame(width: 10, height: 10)
+                            Text("\(part.count) \(part.label)")
+                                .font(.system(size: 12))
+                                .foregroundColor(Palette.textTertiary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .help(part.filter == .all ? "" : "Voir ces paquets dans la Bibliothèque")
+                }
+                Spacer()
+                if security.knownExploitedCount > 0 {
+                    Pill("\(security.knownExploitedCount) faille(s) exploitée(s) — catalogue KEV", tone: .danger, icon: "flame.fill")
+                } else if security.hasAuditResults {
+                    Pill("Aucune faille exploitée connue (KEV)", tone: .success, icon: "checkmark")
+                }
+                if unmaintainedCount > 0 {
+                    Pill("\(unmaintainedCount) non maintenu(s)", tone: .warning, icon: "archivebox")
+                }
+            }
         }
+        .padding(16)
+        .background(Palette.background)
+        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
 }
 
@@ -384,11 +489,63 @@ struct AuditEmptyState: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(Color(NSColor.underPageBackgroundColor).opacity(0.3))
+        .background(Palette.background)
     }
 }
 
 // MARK: - Ligne de la liste auditée
+
+/// Ce que l'audit a établi pour un paquet, du plus grave au plus rassurant. Un paquet n'appartient
+/// qu'à un groupe : une faille confirmée l'emporte sur un avis à trancher, qui l'emporte sur un
+/// verdict non concluant.
+enum AuditGroup: Int, CaseIterable, Hashable {
+    case confirmed, toDecide, failed, inconclusive, untracked, pending, clean
+
+    static func classify(_ package: BrewPackage, flaws: [CVEVulnerability]) -> AuditGroup {
+        switch package.cveStatus {
+        case .vulnerable:
+            return flaws.contains { $0.isConfirmedAffected || $0.isKnownExploited } ? .confirmed : .toDecide
+        case .inconclusive: return .inconclusive
+        case .notTracked: return .untracked
+        case .error: return .failed
+        case .unscanned, .scanning: return .pending
+        case .clean: return .clean
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .confirmed: return "Failles confirmées"
+        case .toDecide: return "Avis à trancher"
+        case .failed: return "Interrogations échouées"
+        case .inconclusive: return "Non concluants"
+        case .untracked: return "Non suivis"
+        case .pending: return "En attente d'audit"
+        case .clean: return "Sains"
+        }
+    }
+
+    var explanation: String {
+        switch self {
+        case .confirmed: return "La version installée est dans la plage touchée."
+        case .toDecide: return "Avis récents sans plage de versions : à vérifier."
+        case .failed: return "Quota ou réseau : état inconnu, pas sain."
+        case .inconclusive: return "Aucune faille confirmée, avis anciens non tranchés."
+        case .untracked: return "Absents d'EUVD et de la NVD, même sous leur nom amont."
+        case .pending: return "Pas encore comparés aux avis pour cette version."
+        case .clean: return "Aucun avis ouvert pour la version installée."
+        }
+    }
+
+    var tone: Tone {
+        switch self {
+        case .confirmed, .failed: return .danger
+        case .toDecide, .inconclusive: return .warning
+        case .untracked, .pending: return .neutral
+        case .clean: return .success
+        }
+    }
+}
 
 struct AuditPackageRow: View {
     let package: BrewPackage
@@ -396,55 +553,56 @@ struct AuditPackageRow: View {
 
     private var flaws: [CVEVulnerability] { security.openFlaws(for: package) }
 
+    /// Ce que l'audit a établi, en une ligne : la plage touchée, la gravité, ou la raison du doute.
+    private var summary: String {
+        let confirmed = flaws.filter { $0.isConfirmedAffected }
+        if let range = confirmed.first?.affectedRangeSummary {
+            let fix = package.isOutdated ? "corrigé en \(package.latestVersion)" : "pas de correctif publié"
+            return "touche \(range) · \(fix)"
+        }
+        if !flaws.isEmpty {
+            let score = flaws.compactMap { $0.cvssScore }.max()
+                .map { " · jusqu'à " + $0.formatted(.number.precision(.fractionLength(1)).locale(Locale(identifier: "fr_FR"))) } ?? ""
+            return "\(flaws.count) avis sans plage\(score)"
+        }
+        switch package.cveStatus {
+        case .inconclusive(let unresolved): return "\(unresolved) avis anciens non tranchés"
+        case .error(let reason): return reason
+        default: return package.installedVersion
+        }
+    }
+
     var body: some View {
         HStack(spacing: 10) {
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 6) {
                     Text(package.name)
-                        .font(.system(size: 13, weight: .bold))
+                        .font(DesignSystem.Typography.packageName)
+                        .foregroundColor(Palette.text)
                     if flaws.contains(where: { $0.isKnownExploited }) {
                         Image(systemName: "flame.fill")
                             .font(.system(size: 10))
-                            .foregroundColor(.red)
+                            .foregroundColor(Palette.danger)
                             .help("Exploitation avérée (catalogue KEV de la CISA)")
                     }
                 }
-                Text("v\(package.installedVersion)")
-                    .font(DesignSystem.Typography.monospace)
-                    .foregroundColor(.secondary)
+                Text(summary)
+                    .font(.system(size: 11))
+                    .foregroundColor(Palette.textSecondary)
+                    .lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 6)
             if security.pendingEnrichment.contains(package.name) {
                 Image(systemName: "hourglass")
                     .font(.system(size: 10))
-                    .foregroundColor(.purple)
+                    .foregroundColor(Palette.textSecondary)
                     .help("Complément NVD en attente : ce verdict peut encore s'étoffer")
             }
-            statusBadge
-        }
-    }
-
-    @ViewBuilder
-    private var statusBadge: some View {
-        switch package.cveStatus {
-        case .vulnerable(let count, let severity):
-            StatusBadge(text: "\(count)", color: severity.color, icon: "exclamationmark.triangle.fill")
-        case .scanning:
-            ProgressView().controlSize(.small)
-        case .clean:
-            Image(systemName: "checkmark.shield.fill")
-                .foregroundColor(.green)
-        case .notTracked:
-            Image(systemName: "questionmark.circle")
-                .foregroundColor(.secondary)
-                .help("Produit absent de la base interrogée")
-        case .error(let reason):
-            Image(systemName: "wifi.exclamationmark")
-                .foregroundColor(.red)
-                .help(reason)
-        case .unscanned:
-            Image(systemName: "circle.dashed")
-                .foregroundColor(.secondary.opacity(0.5))
+            if case .scanning = package.cveStatus {
+                ProgressView().controlSize(.small)
+            } else {
+                SecurityVerdictPill(package: package)
+            }
         }
     }
 }

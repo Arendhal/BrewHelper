@@ -1,199 +1,173 @@
 import SwiftUI
 
+/// Fiche d'un paquet : inspecteur de la Bibliothèque, feuille de Découvrir. Pensée pour une
+/// colonne étroite : l'essentiel (pourquoi il est là, sécurité, actions) avant le détail technique.
 public struct PackageDetailView: View {
     @EnvironmentObject var appState: AppState
     @Environment(\.openURL) var openURL
-    
+
     let package: BrewPackage
-    
+
     public init(package: BrewPackage) {
         self.package = package
     }
-    
+
+    private var isInstalled: Bool { appState.isPackageInstalled(name: package.fullName) || appState.isPackageInstalled(name: package.name) }
+    private var dependents: [String] { appState.dependents(of: package) }
+    private var isPending: Bool { appState.hasPendingTask(forPackage: package.id) }
+
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
-                // Header Banner
-                HStack(alignment: .top, spacing: 18) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 16)
-                            .fill(package.type == .cask ? DesignSystem.Colors.purpleGradient : DesignSystem.Colors.primaryGradient)
-                            .frame(width: 64, height: 64)
-                            .shadow(color: (package.type == .cask ? Color.purple : Color.blue).opacity(0.3), radius: 8, y: 4)
-                        Image(systemName: package.type == .cask ? "macwindow.on.rectangle" : "shippingbox.fill")
-                            .font(.system(size: 32, weight: .bold))
-                            .foregroundColor(.white)
-                    }
-                    
-                    VStack(alignment: .leading, spacing: 6) {
-                        HStack {
-                            Text(package.name)
-                                .font(DesignSystem.Typography.title)
-                            StatusBadge(text: package.type.rawValue, color: package.type == .cask ? .indigo : .blue)
-                            if package.isOutdated {
-                                StatusBadge(text: "Mise à jour v\(package.latestVersion) disponible", color: .orange, icon: "sparkles")
-                            } else {
-                                StatusBadge(text: "À jour", color: .green, icon: "checkmark.circle.fill")
-                            }
-                        }
-                        
-                        Text(package.description)
-                            .font(DesignSystem.Typography.body)
-                            .foregroundColor(.secondary)
-                            .lineLimit(3)
-                        
-                        HStack(spacing: 16) {
-                            Text("Installé : **v\(package.installedVersion)**")
-                                .font(DesignSystem.Typography.body)
-                            Text("Licence : **\(package.license)**")
-                                .font(DesignSystem.Typography.body)
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(.top, 4)
-                    }
-                    Spacer()
-                }
-                
-                // Action Buttons
-                HStack(spacing: 12) {
-                    if !appState.isPackageInstalled(name: package.name) {
-                        ActionButton(title: "Installer sur mon Mac (brew install)", icon: "arrow.down.circle.fill", gradient: DesignSystem.Colors.greenGradient) {
-                            appState.executePackageAction(package: package, action: .install)
-                        }
-                    } else {
-                        if package.isOutdated {
-                            ActionButton(title: "Mettre à jour v\(package.latestVersion)", icon: "arrow.up.circle.fill", gradient: DesignSystem.Colors.greenGradient) {
-                                appState.executePackageAction(package: package, action: .upgrade)
-                            }
-                        }
-                        
-                        ActionButton(title: "Réinstaller", icon: "arrow.triangle.2.circlepath", gradient: DesignSystem.Colors.primaryGradient) {
-                            appState.executePackageAction(package: package, action: .reinstall)
-                        }
-                    }
-                    
-                    Button(action: {
-                        if let url = URL(string: package.homepage) {
-                            openURL(url)
-                        }
-                    }) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "globe")
-                            Text("Site Web")
-                        }
-                        .font(.system(size: 13, weight: .medium))
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 8)
-                        .background(Color(NSColor.controlBackgroundColor))
-                        .cornerRadius(10)
-                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.gray.opacity(0.3), lineWidth: 1))
-                    }
-                    .buttonStyle(.plain)
-                    
-                    Spacer()
-                    
-                    if appState.isPackageInstalled(name: package.name) {
-                        Button(action: {
-                            appState.executePackageAction(package: package, action: .uninstall)
-                        }) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "trash.fill")
-                                Text("Désinstaller")
-                            }
-                            .font(.system(size: 13, weight: .medium))
-                            .foregroundColor(.red)
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 8)
-                            .background(Color.red.opacity(0.12))
-                            .cornerRadius(10)
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                
-                Divider()
-                
-                // Bottles & Apple Silicon Architecture Section
-                VStack(alignment: .leading, spacing: 12) {
-                    HStack {
-                        Image(systemName: "cpu.fill")
-                            .foregroundColor(.blue)
-                        Text(package.type == .formula ? "Bouteilles et Architectures Compatibles (Bottles)" : "Type d'Application macOS")
-                            .font(DesignSystem.Typography.sectionHeader)
-                    }
-                    
-                    GlassCard {
-                        if package.bottleArchitectures.isEmpty {
-                            Text("Aucune information spécifique de bouteille précompilée disponible pour ce paquet (assemblé depuis les sources ou Cask).")
-                                .font(DesignSystem.Typography.body)
-                                .foregroundColor(.secondary)
-                        } else {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 140), spacing: 8)], alignment: .leading, spacing: 8) {
-                                ForEach(package.bottleArchitectures, id: \.self) { arch in
-                                    HStack(spacing: 6) {
-                                        Image(systemName: arch.contains("arm64") ? "bolt.shield.fill" : "desktopcomputer")
-                                            .foregroundColor(arch.contains("arm64") ? .green : .blue)
-                                            .font(.system(size: 12))
-                                        Text(arch)
-                                            .font(DesignSystem.Typography.monospace)
-                                    }
-                                    .padding(8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(Color(NSColor.controlBackgroundColor).opacity(0.7))
-                                    .cornerRadius(8)
-                                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(arch.contains("arm64") ? Color.green.opacity(0.4) : Color.clear, lineWidth: 1))
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Dependencies Tree (Using native LazyVGrid instead of custom FlowLayout to avoid layout recursion)
-                if !package.dependencies.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "point.3.filled.connected.trianglepath.dotted")
-                                .foregroundColor(.purple)
-                            Text("Dépendances Installées (\(package.dependencies.count))")
-                                .font(DesignSystem.Typography.sectionHeader)
-                        }
-                        
-                        GlassCard {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 120), spacing: 8)], alignment: .leading, spacing: 8) {
-                                ForEach(package.dependencies, id: \.self) { dep in
-                                    StatusBadge(text: dep, color: .purple, icon: "cube.fill")
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                }
-                            }
-                        }
-                    }
-                }
-                
-                // Caveats
-                if let caveats = package.caveats, !caveats.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        HStack {
-                            Image(systemName: "lightbulb.fill")
-                                .foregroundColor(.yellow)
-                            Text("Avertissements & Caveats Homebrew")
-                                .font(DesignSystem.Typography.sectionHeader)
-                        }
-                        
-                        Text(caveats)
-                            .font(DesignSystem.Typography.monospace)
-                            .padding(14)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .background(Color.yellow.opacity(0.1))
-                            .cornerRadius(12)
-                            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.yellow.opacity(0.3), lineWidth: 1))
-                    }
-                }
-                
+            VStack(alignment: .leading, spacing: 20) {
+                header
+                facts
+                actions
                 PackageSecuritySection(package: package)
-                
-                Spacer()
+                technicalDetails
             }
-            .padding(28)
+            .padding(24)
+            .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    private var header: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(package.type == .cask ? "APPLICATION (CASK)" : "OUTIL EN LIGNE DE COMMANDE")
+                .font(.system(size: 11, weight: .bold))
+                .tracking(0.5)
+                .foregroundColor(Palette.textSecondary)
+            Text(package.name)
+                .font(.system(size: 22, weight: .bold, design: .monospaced))
+                .foregroundColor(Palette.text)
+                .textSelection(.enabled)
+            Text(package.description)
+                .font(DesignSystem.Typography.body)
+                .foregroundColor(Palette.textTertiary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var facts: some View {
+        Grid(alignment: .leading, horizontalSpacing: 16, verticalSpacing: 10) {
+            GridRow {
+                fact("Installé", isInstalled ? package.installedVersion : "Non installé", mono: isInstalled)
+                fact("Dernière version", package.isOutdated ? package.latestVersion : (isInstalled ? "À jour" : package.latestVersion),
+                     mono: package.isOutdated || !isInstalled, tone: package.isOutdated ? .accent : nil)
+            }
+            if isInstalled {
+                GridRow {
+                    fact("Pourquoi il est là", PackageOrigin.describe(package, dependents: dependents))
+                        .gridCellColumns(2)
+                }
+                if !dependents.isEmpty && package.installedOnRequest {
+                    GridRow {
+                        fact("Requis aussi par", dependents.joined(separator: ", "))
+                            .gridCellColumns(2)
+                    }
+                }
+            }
+        }
+    }
+
+    private func fact(_ label: String, _ value: String, mono: Bool = false, tone: Tone? = nil) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label).font(.system(size: 12)).foregroundColor(Palette.textSecondary)
+            Text(value)
+                .font(.system(size: 13, weight: .semibold, design: mono ? .monospaced : .default))
+                .foregroundColor(tone?.foreground ?? Palette.text)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var actions: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isPending {
+                Label("Une commande pour ce paquet est en file — voir l'Activité", systemImage: "hourglass")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(Palette.accentText)
+            }
+            if !isInstalled {
+                Button {
+                    appState.executePackageAction(package: package, action: .install)
+                } label: {
+                    Label("Installer", systemImage: "arrow.down.circle").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(isPending)
+            } else if package.isOutdated {
+                Button {
+                    appState.executePackageAction(package: package, action: .upgrade)
+                } label: {
+                    Label("Mettre à jour vers \(package.latestVersion)", systemImage: "arrow.up.circle").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(PrimaryButtonStyle())
+                .disabled(isPending)
+            }
+            HStack(spacing: 8) {
+                if isInstalled {
+                    Button("Réinstaller") { appState.executePackageAction(package: package, action: .reinstall) }
+                        .buttonStyle(SecondaryButtonStyle())
+                        .disabled(isPending)
+                }
+                if let url = URL(string: package.homepage), package.homepage != "https://brew.sh" {
+                    Button("Site du projet") { openURL(url) }
+                        .buttonStyle(SecondaryButtonStyle())
+                }
+                Spacer()
+                if isInstalled {
+                    Button("Désinstaller") { appState.executePackageAction(package: package, action: .uninstall) }
+                        .buttonStyle(SecondaryButtonStyle(destructive: true))
+                        .disabled(isPending)
+                }
+            }
+            if isInstalled {
+                Text(uninstallNote)
+                    .font(.system(size: 11))
+                    .foregroundColor(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// Ce qu'une désinstallation casserait, dit avant qu'on clique.
+    private var uninstallNote: String {
+        if dependents.isEmpty { return "Aucun autre paquet installé ne dépend de \(package.name)." }
+        return "Requis par \(dependents.joined(separator: ", ")) : Homebrew refusera de le désinstaller tant qu'ils sont là."
+    }
+
+    @ViewBuilder
+    private var technicalDetails: some View {
+        if !package.dependencies.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Dépendances", subtitle: "\(package.dependencies.count)")
+                Text(package.dependencies.joined(separator: "  ·  "))
+                    .font(DesignSystem.Typography.monospace)
+                    .foregroundColor(Palette.textTertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .textSelection(.enabled)
+            }
+        }
+        if let caveats = package.caveats, !caveats.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Avertissements Homebrew")
+                Text(caveats)
+                    .font(DesignSystem.Typography.monospace)
+                    .foregroundColor(Palette.text)
+                    .padding(12)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Palette.warningBackground)
+                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    .textSelection(.enabled)
+            }
+        }
+        if package.type == .formula && !package.bottleArchitectures.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                SectionTitle("Binaires précompilés")
+                Text(package.bottleArchitectures.joined(separator: "  ·  "))
+                    .font(DesignSystem.Typography.monospace)
+                    .foregroundColor(Palette.textSecondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -222,6 +196,10 @@ struct PackageSecuritySection: View {
         VStack(alignment: .leading, spacing: 12) {
             header
 
+            if let warning = maintenanceWarning {
+                verdictCard(icon: "archivebox.fill", color: .orange, title: warning.title, message: warning.message)
+            }
+
             if let failure = security.scanFailures[package.name] {
                 verdictCard(icon: "wifi.exclamationmark", color: .red,
                             title: "Vérification impossible",
@@ -233,9 +211,17 @@ struct PackageSecuritySection: View {
             } else if security.untrackedPackages.contains(package.name) {
                 verdictCard(icon: "questionmark.circle.fill", color: .secondary,
                             title: "Produit absent de la base \(security.source.shortLabel)",
-                            message: security.source == .hybrid
+                            message: (security.source == .hybrid
                                 ? "Ni EUVD ni la NVD ne suivent ce logiciel sous ce nom : l'absence de résultat n'y prouve rien."
                                 : "La base interrogée ne suit pas ce logiciel : l'absence de résultat n'y prouve rien. Essayez une autre base depuis l'onglet Audit de Sécurité.")
+                                + triedNamesNote)
+                ManualVerificationView(package: package)
+            } else if vulnerabilities.isEmpty, let unresolved = security.unresolvedAdvisories[package.name] {
+                verdictCard(icon: "questionmark.diamond.fill", color: .yellow,
+                            title: "Verdict non concluant",
+                            message: "Aucune faille confirmée pour la v\(package.installedVersion), mais \(unresolved.count) avis rattaché(s) à ce logiciel ne publient aucune plage de versions : ils n'ont pu être ni confirmés ni écartés. Anciens, ils sont probablement corrigés depuis — à vérifier dans les notes de version du projet.")
+                UnresolvedAdvisoriesView(identifiers: unresolved)
+                ManualVerificationView(package: package)
             } else if vulnerabilities.isEmpty {
                 verdictCard(icon: "checkmark.shield.fill", color: .green,
                             title: "Aucune faille non corrigée pour la version installée",
@@ -283,6 +269,31 @@ struct PackageSecuritySection: View {
                 .buttonStyle(.link)
                 .font(.system(size: 12, weight: .semibold))
             }
+        }
+    }
+
+    /// Noms amont essayés en plus du nom du paquet : dire ce qui a été cherché rend le « non suivi » vérifiable.
+    private var triedNamesNote: String {
+        let aliases = ProductAliases.upstreamNames(for: package)
+        guard !aliases.isEmpty else { return "" }
+        return " Noms amont également interrogés : \(aliases.joined(separator: ", "))."
+    }
+
+    /// Ce que Homebrew sait de la maintenance vaut quel que soit le verdict des bases — et pèse
+    /// d'autant plus qu'aucune base ne suit le paquet.
+    private var maintenanceWarning: (title: String, message: String)? {
+        let reason: (String?) -> String = { $0.map { " Motif déclaré par Homebrew : \($0.replacingOccurrences(of: "_", with: " "))." } ?? "" }
+        switch package.lifecycle {
+        case .disabled(let why):
+            return ("Paquet désactivé par Homebrew",
+                    "Homebrew ne le construit plus et ne le mettra plus à jour : aucune faille future ne sera corrigée.\(reason(why)) Cherchez un remplaçant.")
+        case .deprecated(let why):
+            return ("Paquet déprécié par Homebrew",
+                    "Il sera désactivé à terme et ne suivra plus les correctifs amont.\(reason(why))")
+        case .maintained:
+            guard package.isThirdPartyTap, let tap = package.tap else { return nil }
+            return ("Formule d'un tap tiers (\(tap))",
+                    "Ni la formule ni ses binaires ne sont relus par Homebrew : la confiance repose sur l'auteur du tap.")
         }
     }
 
@@ -456,6 +467,81 @@ struct IdentityBadge: View {
 }
 
 /// Les avis écartés et pourquoi : ce qui n'est pas retenu doit pouvoir se justifier.
+/// Quand aucune base ne tranche, l'utilisateur doit pouvoir vérifier lui-même — sans retaper le
+/// nom du paquet dans quatre sites différents.
+struct ManualVerificationView: View {
+    let package: BrewPackage
+    @Environment(\.openURL) private var openURL
+
+    private var links: [(label: String, url: URL)] {
+        let names = [ProductNameMatcher.normalize(package.fullName.split(separator: "/").last.map(String.init) ?? package.name)]
+            + ProductAliases.upstreamNames(for: package)
+        let query = names.first ?? package.name
+        let encoded = query.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? query
+        var result: [(String, String)] = [
+            ("NVD", "https://nvd.nist.gov/vuln/search#/nvd/home?keyword=\(encoded)&resultType=records"),
+            ("EUVD", "https://euvd.enisa.europa.eu/search?product=\(encoded)"),
+            ("OSV", "https://osv.dev/list?q=\(encoded)"),
+        ]
+        for candidate in [package.sourceURL, package.homepage].compactMap({ $0 }) {
+            guard let url = URL(string: candidate), url.host?.lowercased() == "github.com" else { continue }
+            let parts = url.pathComponents.filter { $0 != "/" }
+            guard parts.count >= 2 else { continue }
+            result.append(("Avis du dépôt GitHub", "https://github.com/\(parts[0])/\(parts[1])/security/advisories"))
+            break
+        }
+        if let homepage = URL(string: package.homepage), package.homepage != "https://brew.sh" {
+            result.append(("Site du projet", homepage.absoluteString))
+        }
+        return result.compactMap { label, raw in URL(string: raw).map { (label, $0) } }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("Vérification manuelle", systemImage: "magnifyingglass")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+            HStack(spacing: 12) {
+                ForEach(links, id: \.label) { link in
+                    Button(link.label) { openURL(link.url) }
+                        .buttonStyle(.link)
+                        .font(.system(size: 12))
+                }
+                Spacer()
+            }
+        }
+    }
+}
+
+/// Avis rattachés au paquet sans plage de versions, que l'audit n'a pu trancher.
+struct UnresolvedAdvisoriesView: View {
+    let identifiers: [String]
+    @Environment(\.openURL) private var openURL
+    @State private var expanded = false
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $expanded) {
+            VStack(alignment: .leading, spacing: 4) {
+                ForEach(identifiers, id: \.self) { identifier in
+                    Button(identifier) {
+                        let page = identifier.hasPrefix("EUVD-")
+                            ? "https://euvd.enisa.europa.eu/vulnerability/\(identifier)"
+                            : "https://nvd.nist.gov/vuln/detail/\(identifier)"
+                        if let url = URL(string: page) { openURL(url) }
+                    }
+                    .buttonStyle(.link)
+                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
+                }
+            }
+            .padding(.top, 6)
+        } label: {
+            Label("\(identifiers.count) avis non tranché(s)", systemImage: "questionmark.diamond")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
 struct RejectedAdvisoriesView: View {
     let advisories: [RejectedAdvisory]
     @State private var expanded = false

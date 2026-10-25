@@ -100,6 +100,10 @@ public class CVESecurityService: ObservableObject {
     /// plateforme, schéma de version, références) ont écartés : ce qui n'est pas retenu doit
     /// pouvoir se justifier.
     @Published public private(set) var rejectedAdvisories: [String: [RejectedAdvisory]] = [:]
+    /// Avis rattachés au paquet mais sans plage de versions exploitable, et trop anciens pour être
+    /// listés comme failles ouvertes : on ne sait pas les trancher. Un paquet qui n'a que ceux-là
+    /// n'est pas « sain », il est « non concluant ».
+    @Published public private(set) var unresolvedAdvisories: [String: [String]] = [:]
 
     // Le complément (NVD en mode hybride) tourne sur sa propre file, après et pendant
     // l'audit principal : il a sa progression, et ses échecs n'invalident pas un résultat
@@ -173,6 +177,11 @@ public class CVESecurityService: ObservableObject {
 
     public var hasAuditResults: Bool { lastAuditDate != nil }
 
+    /// Paquets sans faille confirmée mais avec des avis qu'aucune plage de versions ne tranche.
+    public var inconclusiveCount: Int {
+        unresolvedAdvisories.keys.filter { packageVulnerabilities[$0]?.isEmpty ?? false }.count
+    }
+
     private var scanTask: Task<Void, Never>? = nil
     private var enrichTask: Task<Void, Never>? = nil
     private var primaryQueue: PriorityWorkQueue<BrewPackage>? = nil
@@ -206,7 +215,10 @@ public class CVESecurityService: ObservableObject {
         if let reason = scanFailures[package.name] { return .error(reason) }
         guard let flaws = cachedVulnerabilities(for: package) else { return .unscanned }
         if untrackedPackages.contains(package.name) { return .notTracked }
-        guard let worst = flaws.map({ $0.severity }).max() else { return .clean }
+        guard let worst = flaws.map({ $0.severity }).max() else {
+            let unresolved = unresolvedAdvisories[package.name]?.count ?? 0
+            return unresolved > 0 ? .inconclusive(unresolved: unresolved) : .clean
+        }
         return .vulnerable(cveCount: flaws.count, highestSeverity: worst)
     }
 
@@ -217,7 +229,10 @@ public class CVESecurityService: ObservableObject {
         if let flaws = packageVulnerabilities[package.name], !flaws.isEmpty {
             return flaws.map { $0.riskScore }.max() ?? 0
         }
-        return scanFailures[package.name] != nil ? -1 : -2
+        if scanFailures[package.name] != nil { return -1 }
+        // Ce qui n'a pas pu être vérifié passe devant ce qui l'a été.
+        if untrackedPackages.contains(package.name) || unresolvedAdvisories[package.name] != nil { return -1.5 }
+        return -2
     }
 
     /// Failles ouvertes d'un paquet, classées de la plus urgente à la moins urgente.
@@ -243,6 +258,7 @@ public class CVESecurityService: ObservableObject {
         scanFailures.removeAll()
         untrackedPackages.removeAll()
         rejectedAdvisories.removeAll()
+        unresolvedAdvisories.removeAll()
         sourceOutcomes.removeAll()
         pendingEnrichment.removeAll()
         scannedCount = 0
@@ -306,6 +322,7 @@ public class CVESecurityService: ObservableObject {
                 scanFailures.removeValue(forKey: package.name)
                 untrackedPackages.remove(package.name)
                 rejectedAdvisories.removeValue(forKey: package.name)
+                unresolvedAdvisories.removeValue(forKey: package.name)
                 onUpdate(package.id, .unscanned)
             }
         }
@@ -442,6 +459,14 @@ public class CVESecurityService: ObservableObject {
         var rejected: [RejectedAdvisory] = []
         for case .assessed(_, let list) in sourceOutcomes[package.name, default: [:]].values { rejected += list }
         rejectedAdvisories[package.name] = Array(Set(rejected)).sorted { ($0.source, $0.advisoryID) < ($1.source, $1.advisoryID) }
+        var assessed: [CVEVulnerability] = []
+        for case .assessed(let flaws, _) in sourceOutcomes[package.name, default: [:]].values { assessed += flaws }
+        let unresolved = Self.setAsideUnverifiable(assessed)
+        if unresolved.isEmpty {
+            unresolvedAdvisories.removeValue(forKey: package.name)
+        } else {
+            unresolvedAdvisories[package.name] = unresolved
+        }
         let combined = Self.combine(Array(sourceOutcomes[package.name, default: [:]].values))
         apply(combined, to: package, onUpdate: onUpdate)
     }
@@ -478,6 +503,7 @@ public class CVESecurityService: ObservableObject {
             onUpdate(package.id, .error(reason))
         case .notTracked:
             scanFailures.removeValue(forKey: package.name)
+            unresolvedAdvisories.removeValue(forKey: package.name)
             untrackedPackages.insert(package.name)
             store([], for: package)
             onUpdate(package.id, .notTracked)
@@ -489,7 +515,8 @@ public class CVESecurityService: ObservableObject {
             let flaws = ThreatIntelService.shared.enrich(found).sorted { $0.riskScore > $1.riskScore }
             store(flaws, for: package)
             if flaws.isEmpty {
-                onUpdate(package.id, .clean)
+                let unresolved = unresolvedAdvisories[package.name]?.count ?? 0
+                onUpdate(package.id, unresolved > 0 ? .inconclusive(unresolved: unresolved) : .clean)
             } else {
                 let worst = flaws.map { $0.severity }.max() ?? .low
                 onUpdate(package.id, .vulnerable(cveCount: flaws.count, highestSeverity: worst))
@@ -560,7 +587,7 @@ public class CVESecurityService: ObservableObject {
 
     /// Bump whenever the matching / version logic changes: verdicts computed by an older engine
     /// would otherwise survive in the cache and keep showing the old (wrong) results.
-    private static let engineVersion = 4
+    private static let engineVersion = 6
 
     private struct AuditSnapshot: Codable {
         var engine: Int? = nil
@@ -570,6 +597,7 @@ public class CVESecurityService: ObservableObject {
         let vulnerabilities: [String: [CVEVulnerability]]
         let untracked: [String]
         var rejected: [String: [RejectedAdvisory]]? = nil
+        var unresolved: [String: [String]]? = nil
     }
 
     private func saveToDisk() {
@@ -584,7 +612,8 @@ public class CVESecurityService: ObservableObject {
                                      versions: scannedVersions,
                                      vulnerabilities: packageVulnerabilities,
                                      untracked: Array(untrackedPackages),
-                                     rejected: rejectedAdvisories)
+                                     rejected: rejectedAdvisories,
+                                     unresolved: unresolvedAdvisories)
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
         try? data.write(to: url, options: .atomic)
     }
@@ -600,10 +629,28 @@ public class CVESecurityService: ObservableObject {
         packageVulnerabilities = snapshot.vulnerabilities
         untrackedPackages = Set(snapshot.untracked)
         rejectedAdvisories = snapshot.rejected ?? [:]
+        unresolvedAdvisories = snapshot.unresolved ?? [:]
         lastAuditDate = snapshot.date
     }
 
     // MARK: - Tri et dédoublonnage des avis
+
+    /// Avis que `openFlawsNewestFirst` écarte sans les avoir tranchés : aucune base n'en publie de
+    /// plage de versions, et ils sont trop anciens pour figurer parmi les failles ouvertes. Écarter
+    /// n'est pas innocenter : ils sont comptés, pour que le paquet ne passe pas au vert.
+    public nonisolated static func setAsideUnverifiable(_ assessed: [CVEVulnerability]) -> [String] {
+        var merged: [String: CVEVulnerability] = [:]
+        for vulnerability in assessed {
+            merged[vulnerability.id] = merged[vulnerability.id].map { $0.merged(with: vulnerability) } ?? vulnerability
+        }
+        return merged.values
+            .filter { flaw in
+                if case .unverifiable = flaw.verdict { return !flaw.isStillOpen() }
+                return false
+            }
+            .map { $0.id }
+            .sorted(by: >)
+    }
 
     /// Recoupe les relevés d'une même faille (une base peut la citer deux fois, deux bases
     /// la citer chacune), écarte ce que la version installée corrige déjà, puis ordonne du
@@ -664,6 +711,12 @@ public struct VulnerabilityFetcher: Sendable {
         return base.lowercased()
     }
 
+    /// Noms à interroger, dans l'ordre : celui du paquet, puis ses noms amont (`webp` -> `libwebp`).
+    /// Les suivants ne servent que si les précédents n'ont rien donné.
+    private func queryNames(for package: BrewPackage) -> [String] {
+        [productName(for: package)] + ProductAliases.upstreamNames(for: package)
+    }
+
     // MARK: NVD
     //
     // La recherche par mot-clé renvoyait des milliers d'entrées triées de la plus ancienne
@@ -677,9 +730,43 @@ public struct VulnerabilityFetcher: Sendable {
     private static let pageSize = 200
 
     private func fetchNVD(for package: BrewPackage) async -> SourceOutcome {
-        let product = productName(for: package)
+        let names = queryNames(for: package)
+        var rejected: [RejectedAdvisory] = []
+        for name in names {
+            switch await fetchNVD(product: name, for: package) {
+            case .failure(let reason): return .failed(reason)
+            case .success(let result):
+                rejected += result.rejected
+                if !result.flaws.isEmpty { return .assessed(result.flaws, rejected: rejected) }
+            }
+        }
+
+        // Aucun avis exploitable : soit la NVD ne suit pas ce nom, soit elle le suit et rien
+        // ne vise cette version, soit tout ce qu'elle a renvoyé concernait un homonyme
+        // (l'extension Python de Visual Studio Code pour `python`). Le dictionnaire CPE
+        // tranche : Node.js y est publié sous « nodejs », et on ne conclut à l'absence de
+        // suivi que s'il ne connaît aucun produit d'aucun de ces noms.
+        for name in names {
+            guard let resolved = await resolveCPEProduct(named: name, for: package) else { continue }
+            // Le dictionnaire connaît le produit sous un nom déjà interrogé : il est suivi, et
+            // aucune faille ne vise cette version. C'est un paquet sain, pas un paquet inconnu
+            // (xz 5.8.4, c-ares, libidn2... s'affichaient « non suivis »).
+            if names.contains(resolved) { return .assessed([], rejected: rejected) }
+            // Une requête refusée est un échec à montrer, pas une absence de suivi.
+            switch await fetchNVD(product: resolved, for: package) {
+            case .failure(let reason): return .failed(reason)
+            case .success(let result):
+                return .assessed(result.flaws, rejected: rejected + result.rejected)
+            }
+        }
+        return .notTracked
+    }
+
+    /// Avis de la NVD visant `product` dans la version installée.
+    private func fetchNVD(product: String, for package: BrewPackage) async
+        -> FetchResult<(flaws: [CVEVulnerability], rejected: [RejectedAdvisory])> {
         guard let encodedProduct = product.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
-            return .notTracked
+            return .success(([], []))
         }
         let version = package.upstreamInstalledVersion
         let encodedVersion = version.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? version
@@ -689,7 +776,7 @@ public struct VulnerabilityFetcher: Sendable {
         let first: NVDCVEResponse
         switch await request(NVDCVEResponse.self,
                              urlString: "\(base)?virtualMatchString=\(matchWithVersion)&resultsPerPage=\(Self.pageSize)") {
-        case .failure(let reason): return .failed(reason)
+        case .failure(let reason): return .failure(reason)
         case .success(let response): first = response
         }
 
@@ -705,36 +792,7 @@ public struct VulnerabilityFetcher: Sendable {
             }
         }
 
-        var (flaws, rejected) = evaluate(items, for: package)
-
-        if flaws.isEmpty {
-            // Aucun avis exploitable : soit la NVD ne suit pas ce nom, soit elle le suit et rien
-            // ne vise cette version, soit tout ce qu'elle a renvoyé concernait un homonyme
-            // (l'extension Python de Visual Studio Code pour `python`). Le dictionnaire CPE
-            // tranche : Node.js y est publié sous « nodejs », et on ne conclut à l'absence de
-            // suivi que s'il ne connaît aucun produit de ce nom.
-            guard let resolved = await resolveCPEProduct(for: package) else { return .notTracked }
-            // Le dictionnaire connaît le produit sous le nom même qu'on a interrogé : il est
-            // suivi, et aucune faille ne vise cette version. C'est un paquet sain, pas un
-            // paquet inconnu (xz 5.8.4, c-ares, libidn2... s'affichaient « non suivis »).
-            if resolved == product { return .assessed([], rejected: rejected) }
-            guard let encodedResolved = resolved.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else {
-                return .notTracked
-            }
-            let retry = "cpe:2.3:a:*:\(encodedResolved):\(encodedVersion):*:*:*:*:*:*:*"
-            // Une requête refusée est un échec à montrer, pas une absence de suivi.
-            let response: NVDCVEResponse
-            switch await request(NVDCVEResponse.self,
-                                 urlString: "\(base)?virtualMatchString=\(retry)&resultsPerPage=\(Self.pageSize)") {
-            case .failure(let reason): return .failed(reason)
-            case .success(let decoded): response = decoded
-            }
-            let retried = evaluate(response.vulnerabilities ?? [], for: package)
-            flaws = retried.flaws
-            rejected += retried.rejected
-        }
-
-        return .assessed(flaws, rejected: rejected)
+        return .success(evaluate(items, for: package))
     }
 
     private func evaluate(_ items: [NVDCVEItem], for package: BrewPackage) -> (flaws: [CVEVulnerability], rejected: [RejectedAdvisory]) {
@@ -756,8 +814,7 @@ public struct VulnerabilityFetcher: Sendable {
     /// fait le pont. Le nom retenu est le plus fréquent parmi ceux que le rapprochement
     /// produit/paquet accepte — « nodewords » ou « network_node_manager » sont écartés,
     /// « nodejs » retenu.
-    private func resolveCPEProduct(for package: BrewPackage) async -> String? {
-        let name = productName(for: package)
+    private func resolveCPEProduct(named name: String, for package: BrewPackage) async -> String? {
         guard let encoded = name.addingPercentEncoding(withAllowedCharacters: .alphanumerics) else { return nil }
         guard case .success(let response) = await request(
             NVDCPEResponse.self,
@@ -786,7 +843,16 @@ public struct VulnerabilityFetcher: Sendable {
     private static let euvdMaxPages = 25
 
     private func fetchEUVD(for package: BrewPackage) async -> SourceOutcome {
-        let product = productName(for: package)
+        // Les noms amont ne sont essayés que si le nom du paquet ne mène à aucun avis.
+        for name in queryNames(for: package) {
+            let outcome = await fetchEUVD(product: name, for: package)
+            if case .notTracked = outcome { continue }
+            return outcome
+        }
+        return .notTracked
+    }
+
+    private func fetchEUVD(product: String, for package: BrewPackage) async -> SourceOutcome {
         guard let encoded = product.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) else {
             return .notTracked
         }

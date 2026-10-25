@@ -7,6 +7,8 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		B10000000000000000000106 /* CommandPaletteView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000106 /* CommandPaletteView.swift */; };
+		B10000000000000000000105 /* ActivityCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000105 /* ActivityCenter.swift */; };
 		B10000000000000000000001 /* BrewHelperApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000001 /* BrewHelperApp.swift */; };
 		B10000000000000000000002 /* AppState.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000002 /* AppState.swift */; };
 		B10000000000000000000003 /* BrewPackage.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000003 /* BrewPackage.swift */; };
@@ -22,15 +24,17 @@
 		B10000000000000000000100 /* ProductIdentity.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000100 /* ProductIdentity.swift */; };
 		B10000000000000000000008 /* DesignSystem.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000008 /* DesignSystem.swift */; };
 		B10000000000000000000009 /* MainWindowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000009 /* MainWindowView.swift */; };
-		B10000000000000000000010 /* DashboardView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* DashboardView.swift */; };
-		B10000000000000000000011 /* PackageListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* PackageListView.swift */; };
+		B10000000000000000000010 /* HomeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000010 /* HomeView.swift */; };
+		B10000000000000000000011 /* LibraryView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000011 /* LibraryView.swift */; };
 		B10000000000000000000012 /* PackageDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000012 /* PackageDetailView.swift */; };
-		B10000000000000000000013 /* TerminalLogModalView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* TerminalLogModalView.swift */; };
+		B10000000000000000000013 /* ActivityView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000013 /* ActivityView.swift */; };
 		B10000000000000000000099 /* DiscoverCatalogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000099 /* DiscoverCatalogView.swift */; };
 		B10000000000000000000014 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = B20000000000000000000014 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		B20000000000000000000106 /* CommandPaletteView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CommandPaletteView.swift; sourceTree = "<group>"; };
+		B20000000000000000000105 /* ActivityCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityCenter.swift; sourceTree = "<group>"; };
 		B20000000000000000000001 /* BrewHelperApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewHelperApp.swift; sourceTree = "<group>"; };
 		B20000000000000000000002 /* AppState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppState.swift; sourceTree = "<group>"; };
 		B20000000000000000000003 /* BrewPackage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BrewPackage.swift; sourceTree = "<group>"; };
@@ -46,10 +50,10 @@
 		B20000000000000000000100 /* ProductIdentity.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProductIdentity.swift; sourceTree = "<group>"; };
 		B20000000000000000000008 /* DesignSystem.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesignSystem.swift; sourceTree = "<group>"; };
 		B20000000000000000000009 /* MainWindowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainWindowView.swift; sourceTree = "<group>"; };
-		B20000000000000000000010 /* DashboardView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DashboardView.swift; sourceTree = "<group>"; };
-		B20000000000000000000011 /* PackageListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackageListView.swift; sourceTree = "<group>"; };
+		B20000000000000000000010 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
+		B20000000000000000000011 /* LibraryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LibraryView.swift; sourceTree = "<group>"; };
 		B20000000000000000000012 /* PackageDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PackageDetailView.swift; sourceTree = "<group>"; };
-		B20000000000000000000013 /* TerminalLogModalView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TerminalLogModalView.swift; sourceTree = "<group>"; };
+		B20000000000000000000013 /* ActivityView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ActivityView.swift; sourceTree = "<group>"; };
 		B20000000000000000000099 /* DiscoverCatalogView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DiscoverCatalogView.swift; sourceTree = "<group>"; };
 		B20000000000000000000014 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B20000000000000000000020 /* BrewHelper.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = BrewHelper.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -98,6 +102,7 @@
 		B40000000000000000000010 /* App */ = {
 			isa = PBXGroup;
 			children = (
+				B20000000000000000000105 /* ActivityCenter.swift */,
 				B20000000000000000000001 /* BrewHelperApp.swift */,
 				B20000000000000000000002 /* AppState.swift */,
 			);
@@ -159,7 +164,7 @@
 		B40000000000000000000015 /* Dashboard */ = {
 			isa = PBXGroup;
 			children = (
-				B20000000000000000000010 /* DashboardView.swift */,
+				B20000000000000000000010 /* HomeView.swift */,
 			);
 			path = Dashboard;
 			sourceTree = "<group>";
@@ -167,7 +172,7 @@
 		B40000000000000000000016 /* Packages */ = {
 			isa = PBXGroup;
 			children = (
-				B20000000000000000000011 /* PackageListView.swift */,
+				B20000000000000000000011 /* LibraryView.swift */,
 				B20000000000000000000012 /* PackageDetailView.swift */,
 				B20000000000000000000099 /* DiscoverCatalogView.swift */,
 			);
@@ -177,7 +182,8 @@
 		B40000000000000000000017 /* Maintenance */ = {
 			isa = PBXGroup;
 			children = (
-				B20000000000000000000013 /* TerminalLogModalView.swift */,
+				B20000000000000000000106 /* CommandPaletteView.swift */,
+				B20000000000000000000013 /* ActivityView.swift */,
 			);
 			path = Maintenance;
 			sourceTree = "<group>";
@@ -266,10 +272,12 @@
 				B10000000000000000000104 /* SecurityAuditView.swift in Sources */,
 				B10000000000000000000008 /* DesignSystem.swift in Sources */,
 				B10000000000000000000009 /* MainWindowView.swift in Sources */,
-				B10000000000000000000010 /* DashboardView.swift in Sources */,
-				B10000000000000000000011 /* PackageListView.swift in Sources */,
+				B10000000000000000000010 /* HomeView.swift in Sources */,
+				B10000000000000000000011 /* LibraryView.swift in Sources */,
 				B10000000000000000000012 /* PackageDetailView.swift in Sources */,
-				B10000000000000000000013 /* TerminalLogModalView.swift in Sources */,
+				B10000000000000000000013 /* ActivityView.swift in Sources */,
+				B10000000000000000000106 /* CommandPaletteView.swift in Sources */,
+				B10000000000000000000105 /* ActivityCenter.swift in Sources */,
 				B10000000000000000000099 /* DiscoverCatalogView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

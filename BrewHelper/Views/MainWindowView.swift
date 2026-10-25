@@ -1,184 +1,192 @@
 import SwiftUI
 
+// La fenêtre : quatre espaces (Accueil, Bibliothèque, Découvrir, Sécurité), l'Activité en bas
+// de la barre latérale, et dans la barre d'outils la palette ⌘K, l'apparence et l'état de la file.
+
 public struct MainWindowView: View {
     @EnvironmentObject var appState: AppState
-    
+    @ObservedObject private var security: CVESecurityService = .shared
+
     public init() {}
-    
+
     public var body: some View {
         NavigationSplitView {
-            // Sidebar
-            VStack(alignment: .leading, spacing: 16) {
-                // Brand Header
-                HStack(spacing: 12) {
+            sidebar
+                .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 260)
+        } detail: {
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(Palette.background)
+        }
+        .toolbar { toolbarContent }
+        .onAppear { appState.onAppearInitialLoad() }
+        .sheet(isPresented: $appState.isPalettePresented) {
+            CommandPaletteView()
+        }
+    }
+
+    // MARK: Barre latérale
+
+    private var sidebar: some View {
+        List(selection: Binding(get: { appState.selectedTab }, set: { if let tab = $0 { appState.selectedTab = tab } })) {
+            Section {
+                ForEach(NavigationTab.primary) { tab in
+                    sidebarRow(tab).tag(tab)
+                }
+            } header: {
+                HStack(spacing: 10) {
                     ZStack {
-                        RoundedRectangle(cornerRadius: 10)
-                            .fill(DesignSystem.Colors.amberGradient)
-                            .frame(width: 38, height: 38)
-                            .shadow(color: .orange.opacity(0.4), radius: 6, y: 2)
+                        RoundedRectangle(cornerRadius: 7, style: .continuous)
+                            .fill(Palette.accent)
+                            .frame(width: 26, height: 26)
                         Image(systemName: "mug.fill")
-                            .font(.system(size: 20, weight: .bold))
+                            .font(.system(size: 13, weight: .bold))
                             .foregroundColor(.white)
                     }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("BrewHelper")
-                            .font(.system(size: 18, weight: .bold, design: .rounded))
-                        Text("macOS Native GUI")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
+                    Text("BrewHelper")
+                        .font(.system(size: 14, weight: .bold))
+                        .foregroundColor(Palette.text)
                 }
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                
+                .padding(.bottom, 10)
+                .textCase(nil)
+            }
+        }
+        .listStyle(.sidebar)
+        .safeAreaInset(edge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
                 Divider()
-                
-                // Navigation Links
-                List(NavigationTab.allCases, selection: $appState.selectedTab) { tab in
-                    NavigationLink(value: tab) {
-                        HStack(spacing: 10) {
-                            Image(systemName: tab.icon)
-                                .font(.system(size: 15))
-                                .frame(width: 22)
-                            
-                            Text(tab.rawValue)
-                                .font(.system(size: 13, weight: .medium))
-                            
-                            Spacer()
-                            
-                            if tab == .outdated && appState.outdatedCount > 0 {
-                                Text("\(appState.outdatedCount)")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.orange)
-                                    .foregroundColor(.white)
-                                    .clipShape(Capsule())
-                            } else if tab == .securityAudit && appState.vulnerableCount > 0 {
-                                Text("\(appState.vulnerableCount)")
-                                    .font(.system(size: 11, weight: .bold))
-                                    .padding(.horizontal, 6)
-                                    .padding(.vertical, 2)
-                                    .background(Color.red)
-                                    .foregroundColor(.white)
-                                    .clipShape(Capsule())
-                            }
-                        }
-                        .padding(.vertical, 4)
-                    }
-                    .tag(tab)
-                }
-                .listStyle(.sidebar)
-                
-                Spacer()
-                
-                // Refresh Button & Status Footer
-                VStack(alignment: .leading, spacing: 8) {
-                    Divider()
-                    HStack {
-                        if appState.isLoading || appState.isCommandRunning || appState.isSyncingCatalog {
-                            ProgressView()
-                                .controlSize(.small)
-                            Text("Synchronisation...")
-                                .font(.system(size: 11))
-                                .foregroundColor(.secondary)
-                        } else {
-                            Button(action: {
-                                appState.runMaintenance(command: .updateOnly)
-                            }) {
-                                HStack(spacing: 6) {
-                                    Image(systemName: "arrow.clockwise.circle.fill")
-                                        .font(.system(size: 14))
-                                        .foregroundColor(.blue)
-                                    Text("Actualiser Homebrew")
-                                        .font(.system(size: 12, weight: .medium))
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
+                Button {
+                    appState.selectedTab = .activity
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: NavigationTab.activity.icon)
+                            .frame(width: 18)
+                        Text(NavigationTab.activity.rawValue)
                         Spacer()
+                        if appState.pendingTaskCount > 0 {
+                            CountBadge(appState.pendingTaskCount, color: Palette.accent)
+                        }
                     }
-                    .padding(.horizontal, 12)
+                    .font(.system(size: 13, weight: appState.selectedTab == .activity ? .semibold : .regular))
+                    .foregroundColor(Palette.text)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(appState.selectedTab == .activity ? Palette.surface : Color.clear)
+                    .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .padding(.horizontal, 10)
+
+                Text(syncLine)
+                    .font(.system(size: 11))
+                    .foregroundColor(Palette.textSecondary)
+                    .padding(.horizontal, 20)
                     .padding(.bottom, 12)
-                }
-            }
-            .frame(minWidth: 220)
-            .background(DesignSystem.Colors.sidebarBackground)
-        } detail: {
-            VStack(spacing: 0) {
-                // LIVE STATUS BANNER (Barre de Progression Silencieuese en Tâche de Fond)
-                if let msg = appState.activeOperationMessage {
-                    VStack(spacing: 6) {
-                        HStack(spacing: 12) {
-                            if appState.isCommandRunning || appState.isSyncingCatalog {
-                                ProgressView()
-                                    .controlSize(.small)
-                            } else {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.green)
-                                    .font(.system(size: 16))
-                            }
-                            
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(msg)
-                                    .font(.system(size: 13, weight: .bold))
-                                    .foregroundColor(.primary)
-                                if let detail = appState.activeOperationDetail, !detail.isEmpty {
-                                    Text(detail)
-                                        .font(DesignSystem.Typography.monospace)
-                                        .font(.system(size: 11))
-                                        .foregroundColor(.secondary)
-                                        .lineLimit(1)
-                                }
-                            }
-                            
-                            Spacer()
-                            
-                            Button("Console Terminal") {
-                                appState.isTerminalPresented = true
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                            .tint(.blue)
-                        }
-                        if appState.isCommandRunning || appState.isSyncingCatalog {
-                            ProgressView()
-                                .progressViewStyle(.linear)
-                                .tint(.blue)
-                        }
-                    }
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(Color(NSColor.controlBackgroundColor).opacity(0.98))
-                    .overlay(
-                        Rectangle().frame(height: 1).foregroundColor(Color(NSColor.separatorColor)),
-                        alignment: .bottom
-                    )
-                    .transition(.move(edge: .top).combined(with: .opacity))
-                    .animation(.easeInOut(duration: 0.25), value: appState.activeOperationMessage)
-                }
-                
-                // Main Detail Content Area
-                Group {
-                    if appState.selectedTab == .dashboard {
-                        DashboardView()
-                    } else if appState.selectedTab == .discover {
-                        DiscoverCatalogView()
-                    } else if appState.selectedTab == .securityAudit {
-                        SecurityAuditView()
-                    } else {
-                        PackageListView(currentTab: appState.selectedTab)
-                    }
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                .background(Color(NSColor.windowBackgroundColor))
             }
         }
-        .onAppear {
-            appState.onAppearInitialLoad()
+    }
+
+    private func sidebarRow(_ tab: NavigationTab) -> some View {
+        HStack(spacing: 8) {
+            Label(tab.rawValue, systemImage: tab.icon)
+            Spacer()
+            switch tab {
+            case .library:
+                if appState.outdatedCount > 0 {
+                    CountBadge(appState.outdatedCount, color: Palette.accent)
+                        .help("Mises à jour disponibles")
+                } else {
+                    Text("\(appState.packages.count)").font(.system(size: 11)).foregroundColor(Palette.textSecondary)
+                }
+            case .security:
+                if security.vulnerableCount > 0 {
+                    CountBadge(security.vulnerableCount, color: Palette.dangerBadge)
+                        .help("Paquets touchés par une faille ou un avis à trancher")
+                }
+            default:
+                EmptyView()
+            }
         }
-        .sheet(isPresented: $appState.isTerminalPresented) {
-            TerminalLogModalView()
+    }
+
+    private static let timeFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "fr_FR")
+        formatter.dateFormat = "HH:mm"
+        return formatter
+    }()
+
+    private var syncLine: String {
+        if appState.isSyncingCatalog { return "Actualisation de Homebrew..." }
+        if let date = appState.lastCatalogSync { return "Homebrew actualisé à \(Self.timeFormatter.string(from: date))" }
+        return "Homebrew pas encore actualisé"
+    }
+
+    // MARK: Contenu
+
+    @ViewBuilder
+    private var detail: some View {
+        switch appState.selectedTab {
+        case .home: HomeView()
+        case .library: LibraryView()
+        case .discover: DiscoverCatalogView()
+        case .security: SecurityAuditView()
+        case .activity: ActivityView()
+        }
+    }
+
+    // MARK: Barre d'outils
+
+    @ToolbarContentBuilder
+    private var toolbarContent: some ToolbarContent {
+        ToolbarItem(placement: .principal) {
+            Button {
+                appState.isPalettePresented = true
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass")
+                    Text("Rechercher un paquet ou une action")
+                    Spacer(minLength: 16)
+                    Text("⌘K")
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .overlay(RoundedRectangle(cornerRadius: 4).stroke(Palette.lineStrong, lineWidth: 1))
+                }
+                .font(.system(size: 13))
+                .foregroundColor(Palette.textSecondary)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .frame(minWidth: 320)
+                .background(Palette.field)
+                .clipShape(RoundedRectangle(cornerRadius: 7, style: .continuous))
+            }
+            .buttonStyle(.plain)
+            .help("Palette de commandes (⌘K)")
+        }
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button {
+                appState.selectedTab = .activity
+            } label: {
+                if let running = appState.runningTask {
+                    HStack(spacing: 6) {
+                        ProgressView().controlSize(.small)
+                        Text(running.title).lineLimit(1)
+                    }
+                } else {
+                    Label("Rien en cours", systemImage: "checkmark.circle")
+                }
+            }
+            .help(appState.pendingTaskCount > 0 ? "\(appState.pendingTaskCount) tâche(s) en cours ou en attente" : "Aucune commande en cours")
+
+            Picker("Apparence", selection: $appState.appearance) {
+                ForEach(AppAppearance.allCases) { appearance in
+                    Label(appearance.label, systemImage: appearance.icon).tag(appearance)
+                }
+            }
+            .pickerStyle(.segmented)
+            .help("Apparence : Auto suit le réglage de macOS")
         }
     }
 }

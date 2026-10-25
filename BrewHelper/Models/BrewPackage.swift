@@ -18,7 +18,13 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
     /// URL de l'archive source (`urls.stable.url`) : avec la page d'accueil, elle désigne le
     /// projet amont, ce qui permet de reconnaître ses avis par leurs références.
     public let sourceURL: String?
-    
+    /// Tap d'origine (`homebrew/core`, `user/tap`...). Hors `homebrew/*`, personne ne relit la formule.
+    public let tap: String?
+    /// État de maintenance déclaré par Homebrew : un logiciel abandonné n'aura plus d'avis ni de correctif.
+    public let lifecycle: PackageLifecycle
+    /// Installé à la demande de l'utilisateur, et non tiré comme dépendance. Un cask l'est toujours.
+    public let installedOnRequest: Bool
+
     public init(
         id: String,
         name: String,
@@ -34,7 +40,10 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         dependencies: [String] = [],
         bottleArchitectures: [String] = [],
         caveats: String? = nil,
-        sourceURL: String? = nil
+        sourceURL: String? = nil,
+        tap: String? = nil,
+        lifecycle: PackageLifecycle = .maintained,
+        installedOnRequest: Bool = true
     ) {
         self.id = id
         self.name = name
@@ -51,6 +60,34 @@ public struct BrewPackage: Identifiable, Hashable, Sendable {
         self.bottleArchitectures = bottleArchitectures
         self.caveats = caveats
         self.sourceURL = sourceURL
+        self.tap = tap
+        self.lifecycle = lifecycle
+        self.installedOnRequest = installedOnRequest
+    }
+
+    /// Hors des taps officiels de Homebrew, ni les bottles ni la formule ne sont relues par le projet.
+    public var isThirdPartyTap: Bool {
+        guard let tap = tap, !tap.isEmpty else { return false }
+        return !tap.hasPrefix("homebrew/")
+    }
+}
+
+/// Ce que Homebrew déclare de la maintenance d'un paquet. Précieux justement quand aucune base de
+/// vulnérabilités ne le suit : un logiciel déprécié ou désactivé ne recevra plus de correctif.
+public enum PackageLifecycle: Hashable, Sendable {
+    case maintained
+    case deprecated(reason: String?)
+    case disabled(reason: String?)
+
+    public var isMaintained: Bool {
+        if case .maintained = self { return true }
+        return false
+    }
+
+    static func from(deprecated: Bool?, disabled: Bool?, reason: String?) -> PackageLifecycle {
+        if disabled == true { return .disabled(reason: reason) }
+        if deprecated == true { return .deprecated(reason: reason) }
+        return .maintained
     }
 }
 
@@ -67,6 +104,9 @@ public enum PackageCVEStatus: Hashable, Sendable {
     /// l'absence de résultat ne prouve rien pour un paquet qu'elle ne suit pas.
     case notTracked
     case vulnerable(cveCount: Int, highestSeverity: CVESeverity)
+    /// Aucune faille confirmée, mais des avis sans plage de versions n'ont pas pu être tranchés :
+    /// ce n'est ni un paquet sain ni un paquet vulnérable.
+    case inconclusive(unresolved: Int)
     case error(String)
 }
 
@@ -88,11 +128,19 @@ public struct FormulaDTO: Codable {
     public let bottle: FormulaBottleDTO?
     public let outdated: Bool?
     public let urls: FormulaURLsDTO?
+    public let tap: String?
+    public let deprecated: Bool?
+    public let disabled: Bool?
+    public let deprecationReason: String?
 
     enum CodingKeys: String, CodingKey {
         case name
         case fullName = "full_name"
         case urls
+        case tap
+        case deprecated
+        case disabled
+        case deprecationReason = "deprecation_reason"
         case desc
         case homepage
         case versions
@@ -145,7 +193,11 @@ public struct FormulaDTO: Codable {
             dependencies: dependencies ?? [],
             bottleArchitectures: architectures,
             caveats: caveats,
-            sourceURL: urls?.stable?.url
+            sourceURL: urls?.stable?.url,
+            tap: tap,
+            lifecycle: .from(deprecated: deprecated, disabled: disabled, reason: deprecationReason),
+            // Une formule absente du disque (catalogue) n'a pas de drapeau : elle compte comme demandée.
+            installedOnRequest: installed?.last?.installedOnRequest ?? true
         )
     }
 }
@@ -164,6 +216,12 @@ public struct FormulaVersionsDTO: Codable {
 
 public struct FormulaInstalledDTO: Codable {
     public let version: String
+    public let installedOnRequest: Bool?
+
+    enum CodingKeys: String, CodingKey {
+        case version
+        case installedOnRequest = "installed_on_request"
+    }
 }
 
 public struct FormulaBottleDTO: Codable {
@@ -185,6 +243,15 @@ public struct CaskDTO: Codable {
     public let installed: String?
     public let outdated: Bool?
     public let url: String?
+    public let tap: String?
+    public let deprecated: Bool?
+    public let disabled: Bool?
+    public let deprecationReason: String?
+
+    enum CodingKeys: String, CodingKey {
+        case token, name, desc, homepage, version, caveats, installed, outdated, url, tap, deprecated, disabled
+        case deprecationReason = "deprecation_reason"
+    }
 
     public func toBrewPackage(outdatedList: Set<String>) -> BrewPackage {
         let displayName = name?.first ?? token
@@ -215,7 +282,9 @@ public struct CaskDTO: Codable {
             dependencies: [],
             bottleArchitectures: ["macOS Universal / Native Cask"],
             caveats: caveats,
-            sourceURL: url
+            sourceURL: url,
+            tap: tap,
+            lifecycle: .from(deprecated: deprecated, disabled: disabled, reason: deprecationReason)
         )
     }
 }

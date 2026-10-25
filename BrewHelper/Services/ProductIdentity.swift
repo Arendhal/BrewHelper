@@ -121,7 +121,8 @@ public enum ProductIdentityEvaluator {
             if parts.count >= 2 { vendor = parts[parts.count - 2] }
         }
 
-        switch vendorPlausibility(vendor, package: package) {
+        let plausibleVendor = vendorPlausibility(vendor, package: package)
+        switch plausibleVendor {
         case .some(true):
             score += 2
             reasons.append("éditeur « \(vendor ?? "") » cohérent avec le projet")
@@ -133,12 +134,28 @@ public enum ProductIdentityEvaluator {
         }
 
         // Un produit désigné par l'adresse même du dépôt amont du paquet ne laisse aucun doute.
+        var corroborated = false
         if kind == .repository, let anchor = ReferenceCorroboration.match(references: [claim.name], package: package) {
             score += 3
+            corroborated = true
             reasons.append("le produit est le dépôt amont du paquet (\(anchor))")
         } else if let anchor = ReferenceCorroboration.match(references: references, package: package) {
             score += 3
+            corroborated = true
             reasons.append("l'avis cite le site officiel du projet (\(anchor))")
+        }
+
+        if plausibleVendor == false && !corroborated {
+            // Un nom seulement voisin que tout le reste contredit : `ca-certificates` recevait les
+            // failles de Step CA, que smallstep publie sous le produit « certificates ».
+            if kind != .exact {
+                return .rejected("Nom seulement voisin (« \(claim.name) ») et éditeur « \(vendor ?? "") » sans lien avec le projet : un autre logiciel")
+            }
+            // Même nom, mais l'éditeur est une distribution qui décrit sa propre version du paquet
+            // (« ca-certificates for Amazon Linux 2 ») : ce n'est pas le logiciel amont qu'installe Homebrew.
+            if let distribution = AdvisoryText.linuxDistribution(in: description, vendor: vendor) {
+                return .rejected("Paquet reconditionné par \(distribution), pas le projet amont")
+            }
         }
 
         let hasVersionInformation = claim.range?.carriesVersionInformation ?? false
@@ -269,6 +286,28 @@ enum AdvisoryText {
         let lowered = text.lowercased()
         guard !macOrNeutral.contains(where: { lowered.contains($0) }) else { return nil }
         return otherPlatformPhrases.first { entry in entry.phrases.contains { lowered.contains($0) } }?.name
+    }
+
+    private static let distributions: [(name: String, phrases: [String], vendors: [String])] = [
+        ("Amazon Linux", ["amazon linux"], ["amazon", "aws"]),
+        ("Red Hat", ["red hat enterprise linux", "rhel"], ["redhat", "redhatinc"]),
+        ("SUSE", ["suse linux", "opensuse", "sles"], ["suse", "opensuse"]),
+        ("Debian", ["debian"], ["debian"]),
+        ("Ubuntu", ["ubuntu"], ["canonical", "ubuntu"]),
+        ("Fedora", ["fedora"], ["fedora", "fedoraproject"]),
+        ("Oracle Linux", ["oracle linux"], ["oracle"]),
+        ("Alpine Linux", ["alpine linux"], ["alpine", "alpinelinux"])
+    ]
+
+    /// La distribution Linux dont l'avis décrit le paquet, quand c'est aussi elle qui le publie :
+    /// « The ca-certificates package ... for Amazon Linux 2 », éditeur Amazon. Les deux indices
+    /// sont exigés : un avis amont cite parfois une distribution touchée sans en être le paquet.
+    static func linuxDistribution(in text: String, vendor: String?) -> String? {
+        let lowered = text.lowercased()
+        let normalizedVendor = ProductNameMatcher.normalize(vendor ?? "")
+        return distributions.first { entry in
+            entry.vendors.contains(normalizedVendor) && entry.phrases.contains { lowered.contains($0) }
+        }?.name
     }
 
     private static let hosts = [

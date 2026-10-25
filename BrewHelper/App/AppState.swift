@@ -1,104 +1,105 @@
 import Foundation
 import SwiftUI
 
+/// Les espaces de l'application. Les anciens onglets Formulae, Casks et Mises à jour sont
+/// devenus des filtres de la Bibliothèque : une seule liste, plusieurs angles.
 public enum NavigationTab: String, CaseIterable, Identifiable {
-    case dashboard = "Vue d'ensemble"
-    case discover = "Découvrir & Installer"
-    case allPackages = "Tous les Paquets"
-    case formulae = "Formulae (CLI)"
-    case casks = "Casks (Apps macOS)"
-    case outdated = "Mises à jour disponibles"
-    case securityAudit = "Audit de Sécurité CVE"
-    
+    case home = "Accueil"
+    case library = "Bibliothèque"
+    case discover = "Découvrir"
+    case security = "Sécurité"
+    case activity = "Activité"
+
     public var id: String { rawValue }
-    
+
     public var icon: String {
         switch self {
-        case .dashboard: return "rectangle.grid.2x2.fill"
-        case .discover: return "bag.fill"
-        case .allPackages: return "shippingbox.fill"
-        case .formulae: return "terminal.fill"
-        case .casks: return "macwindow"
-        case .outdated: return "arrow.triangle.2.circlepath"
-        case .securityAudit: return "lock.shield.fill"
+        case .home: return "house"
+        case .library: return "shippingbox"
+        case .discover: return "safari"
+        case .security: return "shield.lefthalf.filled"
+        case .activity: return "waveform.path.ecg"
         }
     }
+
+    /// Les espaces principaux ; Activité vit en bas de la barre latérale.
+    public static let primary: [NavigationTab] = [.home, .library, .discover, .security]
 }
 
 @MainActor
 public class AppState: ObservableObject {
     @Published public var packages: [BrewPackage] = []
     private var isRefreshing: Bool = false
-    @Published public var selectedTab: NavigationTab = .dashboard
+    @Published public var selectedTab: NavigationTab = .home
     @Published public var isLoading: Bool = false
     @Published public var errorMessage: String? = nil
-    
-    // Featured catalog items
-    @Published public var featuredCatalog: [CatalogItem] = []
-    
-    // Terminal overlay state
-    @Published public var isTerminalPresented: Bool = false
-    @Published public var terminalTitle: String = ""
-    @Published public var terminalLogs: [String] = []
-    @Published public var isCommandRunning: Bool = false
-    
-    // Background Silent Operation State (Progress Banner)
-    @Published public var activeOperationMessage: String? = nil
-    @Published public var activeOperationDetail: String? = nil
-    /// Actualisation du catalogue Homebrew au lancement. Distincte de `isCommandRunning`
-    /// pour ne pas verrouiller les actions de l'interface pendant cette synchronisation.
-    @Published public var isSyncingCatalog: Bool = false
-    
+
+    /// Filtre et sélection de la Bibliothèque, pilotables depuis l'Accueil ou la palette
+    /// (« Voir les 23 non suivis » ouvre la Bibliothèque déjà filtrée).
+    @Published public var libraryFilter: LibraryFilter = .all
+    @Published public var librarySelection: BrewPackage.ID? = nil
+
+    /// Rubriques de « Découvrir », calculées d'après les statistiques d'installation de Homebrew.
+    @Published public var discoverFeed: DiscoverFeed? = nil
+    @Published public var isLoadingDiscover: Bool = false
+    private var discoverSeed: Int? = nil
+
+    // File d'activité (voir ActivityCenter.swift).
+    @Published public var tasks: [BrewTask] = []
+    var isQueueRunning: Bool = false
+
+    @Published public var isPalettePresented: Bool = false
+    /// Recherche transmise à Découvrir depuis la palette ; Découvrir la consomme en s'affichant.
+    @Published public var pendingDiscoverQuery: String? = nil
+
+    @Published public var appearance: AppAppearance {
+        didSet {
+            UserDefaults.standard.set(appearance.rawValue, forKey: AppAppearance.storageKey)
+            appearance.apply()
+        }
+    }
+
+    /// Fin de la dernière actualisation de Homebrew réussie.
+    @Published public private(set) var lastCatalogSync: Date? = nil
+
     private var hasLoadedOnce: Bool = false
-    
+
     public init() {
+        let saved = UserDefaults.standard.string(forKey: AppAppearance.storageKey).flatMap(AppAppearance.init(rawValue:))
+        self.appearance = saved ?? .system
         Task {
+            self.appearance.apply()
             self.onAppearInitialLoad()
         }
     }
-    
+
     public func onAppearInitialLoad() {
         guard !hasLoadedOnce else { return }
         hasLoadedOnce = true
-        
         Task {
-            await loadCatalog()
             await refreshAll()
-            await synchronizeCatalog()
+            // Les recommandations excluent ce qui est installé : elles attendent la liste des paquets,
+            // mais pas l'actualisation de Homebrew.
+            Task { await self.loadCatalog() }
+            synchronizeCatalog()
         }
     }
-    
+
     /// Ce que fait le lancement : actualiser les index Homebrew. C'est cette étape qui
-    /// rend fiable l'état « mises à jour disponibles », et elle est locale et rapide.
-    /// L'audit de vulnérabilités, lui, interroge une base distante paquet par paquet :
-    /// il se déclenche à la demande depuis l'onglet Audit de Sécurité.
-    public func synchronizeCatalog() async {
+    /// rend fiable l'état « mises à jour disponibles ». L'audit de vulnérabilités, lui,
+    /// interroge une base distante paquet par paquet : il se déclenche à la demande.
+    public func synchronizeCatalog() {
         guard !isSyncingCatalog else { return }
-        isSyncingCatalog = true
-        activeOperationMessage = "🔄 Actualisation du catalogue Homebrew..."
-        activeOperationDetail = "brew update"
-        
-        do {
-            let code = try await BrewCommandService.shared.runCommandWithStreaming(arguments: ["update"]) { [weak self] line in
-                self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-            activeOperationMessage = code == 0
-                ? "✅ Catalogue Homebrew à jour."
-                : "⚠️ Actualisation du catalogue terminée (code \(code))."
-        } catch {
-            activeOperationMessage = "⚠️ Catalogue non actualisé : \(error.localizedDescription)"
-        }
-        
-        activeOperationDetail = nil
-        isSyncingCatalog = false
-        await refreshAll()
-        
-        try? await Task.sleep(nanoseconds: 3_000_000_000)
-        if !isCommandRunning && !isSyncingCatalog {
-            activeOperationMessage = nil
-        }
+        enqueue("Actualiser Homebrew", commands: [["update"]])
     }
-    
+
+    public var isSyncingCatalog: Bool {
+        tasks.contains { !$0.status.isFinished && $0.steps.first?.arguments == ["update"] && $0.steps.count == 1 }
+    }
+
+    /// Une commande Homebrew est en cours ou en attente.
+    public var isCommandRunning: Bool { pendingTaskCount > 0 }
+
     /// Lance l'audit de vulnérabilités sur les paquets installés. Toujours déclenché par
     /// une action explicite.
     public func runSecurityAudit(force: Bool = false) {
@@ -111,60 +112,85 @@ public class AppState: ObservableObject {
             }
         }
     }
-    
+
     public func isPackageInstalled(name: String) -> Bool {
         let lower = name.lowercased()
         return packages.contains { $0.name.lowercased() == lower || $0.fullName.lowercased() == lower }
     }
-    
-    // MARK: - Data Refresh & Actions (Instant Local Load + Background Network Sync)
+
+    /// Paquets installés qui dépendent de celui-ci : « pourquoi il est là » pour une dépendance,
+    /// et ce qu'une désinstallation casserait.
+    public func dependents(of package: BrewPackage) -> [String] {
+        let names: Set<String> = [package.name, package.fullName]
+        return packages.filter { candidate in candidate.dependencies.contains { names.contains($0) } }
+            .map { $0.name }
+            .sorted()
+    }
+
+    /// Ouvre la Bibliothèque sur un filtre (et éventuellement un paquet).
+    public func showLibrary(_ filter: LibraryFilter, selecting packageID: BrewPackage.ID? = nil) {
+        libraryFilter = filter
+        librarySelection = packageID
+        selectedTab = .library
+    }
+
+    // MARK: - Données
+
     public func refreshAll() async {
         guard !isRefreshing else { return }
         isRefreshing = true
         defer { isRefreshing = false }
-        
+
         self.isLoading = true
         self.errorMessage = nil
         do {
             let fetched = try await BrewCommandService.shared.fetchInstalledPackagesOnly()
             self.packages = fetched
             self.isLoading = false
-            
+
             // Statuts issus du dernier audit mémorisé : rien n'est interrogé ici.
             for index in self.packages.indices {
                 self.packages[index].cveStatus = CVESecurityService.shared.status(for: self.packages[index])
             }
-            
-            Task {
-                if let outdatedSet = try? await BrewCommandService.shared.fetchOutdatedSet() {
-                    for i in 0..<self.packages.count {
-                        let pkg = self.packages[i]
-                        // `brew outdated` reports casks by their token (fullName), not their display name —
-                        // check both so casks actually match.
-                        let matchesOutdatedSet = outdatedSet.contains(pkg.name) || outdatedSet.contains(pkg.fullName)
-                        if matchesOutdatedSet && pkg.installedVersion != pkg.latestVersion {
-                            var modified = pkg
-                            modified.isOutdated = true
-                            self.packages[i] = modified
-                        } else if pkg.isOutdated && !matchesOutdatedSet && pkg.installedVersion == pkg.latestVersion {
-                            var modified = pkg
-                            modified.isOutdated = false
-                            self.packages[i] = modified
-                        }
+
+            if let outdatedSet = try? await BrewCommandService.shared.fetchOutdatedSet() {
+                for i in 0..<self.packages.count {
+                    let pkg = self.packages[i]
+                    // `brew outdated` reports casks by their token (fullName), not their display name —
+                    // check both so casks actually match.
+                    let matchesOutdatedSet = outdatedSet.contains(pkg.name) || outdatedSet.contains(pkg.fullName)
+                    if matchesOutdatedSet && pkg.installedVersion != pkg.latestVersion {
+                        self.packages[i].isOutdated = true
+                    } else if pkg.isOutdated && !matchesOutdatedSet && pkg.installedVersion == pkg.latestVersion {
+                        self.packages[i].isOutdated = false
                     }
                 }
+            }
+            if tasks.last(where: { $0.steps.first?.arguments == ["update"] })?.status == .succeeded {
+                lastCatalogSync = tasks.last(where: { $0.steps.first?.arguments == ["update"] })?.finishedAt
             }
         } catch {
             self.errorMessage = error.localizedDescription
             self.isLoading = false
         }
     }
-    
+
     public func loadCatalog() async {
-        self.featuredCatalog = await BrewCatalogService.shared.fetchFeaturedItems()
+        guard !isLoadingDiscover else { return }
+        isLoadingDiscover = true
+        let installed = Set(packages.flatMap { [$0.name, $0.fullName] })
+        discoverFeed = await BrewCatalogService.shared.fetchDiscoverFeed(excluding: installed, seed: discoverSeed)
+        isLoadingDiscover = false
     }
-    
-    // MARK: - Computed Properties for Filters & Stats
+
+    /// Nouveau tirage pour « À découvrir aujourd'hui » ; les classements, eux, ne changent qu'avec les statistiques.
+    public func reshuffleDiscover() {
+        discoverSeed = Int.random(in: 0..<Int(Int32.max))
+        Task { await loadCatalog() }
+    }
+
+    // MARK: - Compteurs
+
     public var formulaeCount: Int { packages.filter { $0.type == .formula }.count }
     public var casksCount: Int { packages.filter { $0.type == .cask }.count }
     public var outdatedCount: Int { packages.filter { $0.isOutdated }.count }
@@ -174,170 +200,45 @@ public class AppState: ObservableObject {
             return false
         }.count
     }
-    
-    public func filteredPackages(for tab: NavigationTab, search: String) -> [BrewPackage] {
-        var base: [BrewPackage] = []
-        switch tab {
-        case .dashboard, .discover: base = packages
-        case .allPackages: base = packages
-        case .formulae: base = packages.filter { $0.type == .formula }
-        case .casks: base = packages.filter { $0.type == .cask }
-        case .outdated: base = packages.filter { $0.isOutdated }
-        case .securityAudit:
-            // Classement par risque réel : l'exploitation avérée prime sur le score.
-            base = packages.sorted { CVESecurityService.shared.riskScore(for: $0) > CVESecurityService.shared.riskScore(for: $1) }
-        }
-        
-        if search.trimmingCharacters(in: .whitespaces).isEmpty {
-            return base
-        }
-        let lower = search.lowercased()
-        return base.filter { $0.name.lowercased().contains(lower) || $0.description.lowercased().contains(lower) }
-    }
-    
-    // MARK: - System Maintenance & Terminal Executions (Silent Background & Banner Progress)
+
+    // MARK: - Commandes
+    //
+    // Toutes passent par la file d'activité : une à la fois, chacune avec son journal.
+
     public func runMaintenance(command: BrewCommandType) {
-        terminalTitle = command.rawValue.uppercased()
-        terminalLogs = ["🚀 Initialisation de \(command.rawValue)...", "--------------------------------------------------"]
-        
-        // SILENT MODE: No disruptive terminal popup! Use sleek progress banner instead.
-        isCommandRunning = true
-        activeOperationMessage = "⚙️ Entretien : \(command.rawValue.uppercased()) en cours..."
-        activeOperationDetail = "Lancement des processus de fond..."
-        
-        Task {
-            do {
-                if command == .update {
-                    activeOperationDetail = "[1/2] Actualisation des catalogues et index (brew update)..."
-                    terminalLogs.append("📡 [1/2] Mise à jour des index et catalogues (brew update)...")
-                    let code1 = try await BrewCommandService.shared.runCommandWithStreaming(arguments: ["update"]) { [weak self] line in
-                        self?.terminalLogs.append(line)
-                        self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    if code1 == 0 {
-                        activeOperationDetail = "[2/2] Installation des nouvelles versions (brew upgrade)..."
-                        terminalLogs.append("--------------------------------------------------")
-                        terminalLogs.append("📦 [2/2] Installation des nouvelles versions (brew upgrade)...")
-                        let code2 = try await BrewCommandService.shared.runCommandWithStreaming(arguments: ["upgrade"]) { [weak self] line in
-                            self?.terminalLogs.append(line)
-                            self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                        }
-                        terminalLogs.append("--------------------------------------------------")
-                        let ok = (code2 == 0)
-                        terminalLogs.append(ok ? "✅ Tout le système a été mis à jour avec succès (Code 0)." : "⚠️ Mise à jour achevée (code \(code2)).")
-                        activeOperationMessage = ok ? "✅ Mises à jour terminées avec succès !" : "⚠️ Mises à jour terminées (Code \(code2))"
-                    } else {
-                        terminalLogs.append("❌ Échec lors de l'actualisation du catalogue (brew update code \(code1)).")
-                        activeOperationMessage = "❌ Échec lors de la vérification (Code \(code1))"
-                    }
-                } else {
-                    var args: [String] = []
-                    switch command {
-                    case .doctor: args = ["doctor"]
-                    case .cleanup: args = ["cleanup"]
-                    case .updateOnly: args = ["update"]
-                    case .upgradeAll: args = ["upgrade"]
-                    default: break
-                    }
-                    
-                    let code = try await BrewCommandService.shared.runCommandWithStreaming(arguments: args) { [weak self] line in
-                        self?.terminalLogs.append(line)
-                        self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                    }
-                    terminalLogs.append("--------------------------------------------------")
-                    let ok = (code == 0)
-                    terminalLogs.append(ok ? "✅ Opération terminée avec succès (Code 0)." : "⚠️ Opération achevée avec le code de sortie \(code).")
-                    activeOperationMessage = ok ? "✅ Opération terminée avec succès !" : "⚠️ Opération terminée avec le code \(code)"
-                }
-            } catch {
-                terminalLogs.append("❌ Erreur critique lors de l'exécution : \(error.localizedDescription)")
-                activeOperationMessage = "❌ Erreur : \(error.localizedDescription)"
-            }
-            activeOperationDetail = nil
-            isCommandRunning = false
-            await refreshAll()
-            
-            // Auto-hide success banner after 3.5 seconds
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            if !self.isCommandRunning {
-                self.activeOperationMessage = nil
-            }
+        switch command {
+        case .update: enqueue("Tout mettre à jour", commands: [["update"], ["upgrade"]])
+        case .updateOnly: synchronizeCatalog()
+        case .upgradeAll: enqueue("Mettre à jour tous les paquets", commands: [["upgrade"]])
+        case .cleanup: enqueue("Nettoyer les anciennes versions", commands: [["cleanup"]])
+        case .doctor: enqueue("Diagnostic Homebrew", commands: [["doctor"]])
         }
     }
-    
-    /// Exécute une étape d'un plan de remédiation. Même canal que les autres commandes :
-    /// bandeau de progression, console consultable, rafraîchissement à la fin.
+
+    /// Exécute une étape d'un plan de remédiation.
     public func runRemediationStep(_ step: RemediationStep) {
         guard let arguments = step.command else { return }
         runBrewArguments(arguments, title: step.title)
     }
-    
+
     public func runBrewArguments(_ arguments: [String], title: String) {
-        terminalTitle = title.uppercased()
-        terminalLogs = ["🚀 brew \(arguments.joined(separator: " "))", "--------------------------------------------------"]
-        
-        isCommandRunning = true
-        activeOperationMessage = "⚙️ \(title)..."
-        activeOperationDetail = "brew \(arguments.joined(separator: " "))"
-        
-        Task {
-            do {
-                let code = try await BrewCommandService.shared.runCommandWithStreaming(arguments: arguments) { [weak self] line in
-                    self?.terminalLogs.append(line)
-                    self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                terminalLogs.append("--------------------------------------------------")
-                let ok = (code == 0)
-                terminalLogs.append(ok ? "✅ Terminé avec succès (Code 0)." : "⚠️ Terminé avec le code \(code).")
-                activeOperationMessage = ok ? "✅ \(title) : terminé." : "⚠️ \(title) : code \(code)"
-            } catch {
-                terminalLogs.append("❌ Erreur : \(error.localizedDescription)")
-                activeOperationMessage = "❌ \(title) : \(error.localizedDescription)"
-            }
-            activeOperationDetail = nil
-            isCommandRunning = false
-            // Les versions installées ont changé : les plans et les verdicts calculés
-            // contre l'ancienne version ne valent plus rien.
-            RemediationService.shared.invalidate()
-            await refreshAll()
-            
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            if !self.isCommandRunning {
-                self.activeOperationMessage = nil
-            }
-        }
+        enqueue(title, commands: [arguments])
     }
-    
+
     public func executePackageAction(package: BrewPackage, action: PackageAction) {
-        terminalTitle = "\(action.rawValue.uppercased()) : \(package.name)"
-        terminalLogs = ["🚀 Lancement de : brew \(action.rawValue) \(package.fullName)...", "--------------------------------------------------"]
-        
-        // SILENT MODE: No disruptive popup!
-        isCommandRunning = true
-        activeOperationMessage = action == .install ? "📥 Installation de \(package.name)..." : "⚡️ \(action.rawValue.capitalized) de \(package.name)..."
-        activeOperationDetail = "Préparation des paquets..."
-        
-        Task {
-            do {
-                try await BrewCommandService.shared.executePackageAction(package: package, action: action) { [weak self] line in
-                    self?.terminalLogs.append(line)
-                    self?.activeOperationDetail = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                }
-                terminalLogs.append("--------------------------------------------------")
-                terminalLogs.append("✅ \(action.rawValue.capitalized) sur \(package.name) terminé avec succès.")
-                activeOperationMessage = "✅ \(action == .install ? "Installation" : action.rawValue.capitalized) de \(package.name) réussie !"
-            } catch {
-                terminalLogs.append("❌ Échec : \(error.localizedDescription)")
-                activeOperationMessage = "❌ Échec de \(action.rawValue) sur \(package.name)"
-            }
-            activeOperationDetail = nil
-            isCommandRunning = false
-            await refreshAll()
-            
-            try? await Task.sleep(nanoseconds: 3_500_000_000)
-            if !self.isCommandRunning {
-                self.activeOperationMessage = nil
-            }
+        var arguments = [action.rawValue]
+        if package.type == .cask && (action == .install || action == .reinstall) {
+            arguments.append("--cask")
         }
+        arguments.append(package.fullName.trimmingCharacters(in: .whitespacesAndNewlines))
+
+        let verb: String
+        switch action {
+        case .install: verb = "Installer"
+        case .upgrade: verb = "Mettre à jour"
+        case .reinstall: verb = "Réinstaller"
+        case .uninstall: verb = "Désinstaller"
+        }
+        enqueue("\(verb) \(package.name)", commands: [arguments], packageID: package.id)
     }
 }
