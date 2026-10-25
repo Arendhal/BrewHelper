@@ -1,5 +1,81 @@
 # Journal des versions
 
+## 1.5 — Une interface repensée, et un audit qui dit ce qu'il n'a pas pu vérifier
+
+L'application passe de sept onglets à quatre espaces, chacun répondant à une question :
+dans quel état est ce Mac (*Accueil*), qu'est-ce qui est installé et pourquoi
+(*Bibliothèque*), quoi installer (*Découvrir*), qu'est-ce qui est exposé (*Sécurité*).
+
+### Interface
+
+- **Quatre espaces et une Activité**, au lieu de Vue d'ensemble, Découvrir, Tous les
+  paquets, Formulae, Casks, Mises à jour et Audit. Les anciens onglets de liste deviennent
+  des filtres de la Bibliothèque. **⌘1 à ⌘5** pour passer d'un espace à l'autre.
+- **Palette de commandes ⌘K** : ouvrir un paquet installé, lancer une action (actualiser,
+  tout mettre à jour, relancer l'audit, nettoyer...) ou chercher dans tout Homebrew.
+- **Thème clair et sombre** : toutes les couleurs ont une valeur claire et une valeur
+  sombre ; réglage *Auto* (suit macOS), *Clair* ou *Sombre* dans la barre d'outils. Un
+  seul accent, l'ambre de la tasse ; les couleurs d'état sont réservées au sens.
+- **Nouvelle icône** : le logo de la barre latérale (tasse blanche sur fond ambre)
+  remplace l'ancienne illustration dans le Dock.
+- **Accueil** : l'état du Mac en quatre cartes et une liste **« À faire »** classée par
+  risque réel. Une faille confirmée dont le correctif existe propose « Mettre à jour »,
+  une faille sans correctif le dit ; suivent les avis à trancher, les angles morts de
+  l'audit, les taps tiers et les **dépendances devenues inutiles** (`brew autoremove`).
+- **Bibliothèque** : une liste unique, des filtres (demandés, dépendances, apps, à mettre
+  à jour, vulnérables, non concluants, non suivis, non maintenus) et une colonne
+  **« Pourquoi il est là »** : installé à votre demande, dépendance de tel paquet, ou plus
+  requis par rien. La fiche, en inspecteur, dit avant le clic ce qu'une désinstallation
+  casserait.
+- **Activité** : chaque commande Homebrew devient une tâche qui attend son tour. Deux
+  commandes lancées coup sur coup partaient auparavant en parallèle et se disputaient le
+  verrou de Homebrew. Chaque tâche garde son journal (résumé ou sortie brute) ; l'espace
+  remplace le bandeau de progression et la console modale.
+- **Sécurité** : une barre de couverture (touchés, non concluants, non suivis, sains)
+  remplace la rangée de tuiles, et les paquets sont groupés par verdict — failles
+  confirmées, avis à trancher, interrogations échouées, non concluants, non suivis, sains.
+
+### Découvrir
+
+- **Déclencheur : la page montrait toujours les mêmes douze paquets.** La liste était
+  écrite en dur, avec des versions d'une autre année. Les recommandations viennent
+  maintenant des **statistiques publiques d'installation de Homebrew**, actualisées chaque
+  jour : en forte progression (bien mieux classés ce mois-ci que sur l'année), outils et
+  applications les plus installés, et un tirage du jour parmi des paquets établis mais
+  moins connus (« Autre tirage » pour le renouveler).
+- Les paquets **déjà installés** et les formules versionnées (`openssl@3`) sont exclus ;
+  versions et descriptions sont lues par `brew info`. Hors ligne, une sélection fixe prend
+  le relais.
+- Installer met le paquet en file sans quitter la page ; la fiche s'ouvre en feuille.
+
+### Paquets non vérifiables
+
+- **Noms amont** : un paquet absent des bases sous son nom Homebrew y est aussi cherché
+  sous le nom de son projet — table vérifiée contre le dictionnaire CPE (`webp` →
+  `libwebp`, `icu4c`, `tcl-tk`, `sdl2`/`sdl3`) et nom tiré de l'archive source quand il
+  prolonge celui du paquet (`jpeg-turbo` → `libjpeg-turbo`). Un dépôt au nom générique
+  (`gh` → `cli`) ou plus large que le paquet (`python-tk` → `python`) est ignoré.
+- **Nouveau verdict « non concluant »** : les avis sans plage de versions de plus de trois
+  ans étaient écartés sans bruit, et le paquet passait au vert. Ils sont maintenant
+  comptés et listés ; l'icône de l'audit ne devient verte que si tout a été vérifié.
+- **Ce que Homebrew sait** : un paquet déprécié, désactivé ou issu d'un tap tiers est
+  signalé sur sa fiche, quel que soit le verdict des bases.
+- **Vérification manuelle** : pour un paquet non suivi ou non concluant, liens directs vers
+  la NVD, EUVD, OSV et les avis de sécurité du dépôt GitHub.
+
+### Fausses détections corrigées
+
+- `ca-certificates` recevait les failles de **Step CA**, que smallstep publie sous le
+  produit « certificates » : un nom seulement voisin, avec un éditeur sans lien et aucune
+  référence au projet, est maintenant écarté.
+- `ca-certificates` recevait aussi l'avis du paquet **d'Amazon Linux 2** : un avis publié
+  par une distribution sur sa propre version du paquet n'est plus rattaché au logiciel
+  amont.
+- `yt-dlp 2026.10.21` restait « non vérifiable » face à « < 2026.06.09 » : le mois écrit
+  sur deux chiffres faisait prendre la borne pour une date. Deux numéros calendaires se
+  comparent désormais ; ses sept avis sont reconnus comme corrigés.
+- Le moteur passe en version 6 : le cache d'audit est recalculé au premier audit.
+
 ## 1.4.1 — Rattachement des avis au bon logiciel, et clé NVD vérifiée
 
 Un avis n'est plus retenu parce que son nom ressemble à celui du paquet : chaque

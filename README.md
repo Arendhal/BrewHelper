@@ -9,17 +9,21 @@
 
 ## ✨ Fonctionnalités Principales
 
-### 1. 📦 Gestion Universelle (Formulae & Casks)
-* **Vue d'ensemble intuitive** : Visualisez en temps réel l'ensemble de vos paquets en ligne de commande (*Formulae*) et de vos applications graphiques macOS (*Casks*).
+### 1. 📦 Accueil & Bibliothèque
+* **Quatre espaces** : *Accueil*, *Bibliothèque*, *Découvrir* et *Sécurité*, plus l'*Activité* ; palette de commandes **⌘K** pour ouvrir un paquet ou lancer une action, **⌘1 à ⌘5** pour passer d'un espace à l'autre.
+* **Thème clair ou sombre** : réglage *Auto* (suit macOS), *Clair* ou *Sombre* dans la barre d'outils.
+* **Accueil** : l'état du Mac en quatre cartes (sécurité, couverture de l'audit, mises à jour, activité) et une liste **« À faire »** classée par risque réel — faille confirmée avec ou sans correctif, avis à trancher, angle mort de l'audit, tap tiers, dépendances devenues inutiles (`brew autoremove`).
+* **Bibliothèque** : une seule liste de vos *Formulae* et *Casks*, filtrable (demandés, dépendances, apps, à mettre à jour, vulnérables, non concluants, non suivis, non maintenus), avec pour chaque paquet **pourquoi il est là** (installé à votre demande, dépendance de tel paquet, ou plus requis par rien).
 * **Fiches techniques détaillées** : Accédez au détail de chaque logiciel en un clic — versions locales et distantes, arborescence des dépendances, licences officielles, description et liens directs vers la documentation de l'éditeur.
 * **Détection fine des versions** : Un algorithme scrute localement tous vos répertoires de version (via *Cellar* et *Caskroom*) pour éliminer tout faux positif et vous indiquer avec précision si vous êtes à jour.
 
 ### 2. 🛡️ Audit de Sécurité à la Demande (EUVD/ENISA + NVD/NIST · CISA KEV · EPSS)
-* **Déclenché quand vous le décidez** : le lancement de l'application se contente d'un `brew update` — l'état « mises à jour disponibles » est donc toujours exact. L'audit de vulnérabilités, lui, interroge une base distante paquet par paquet : il se lance depuis l'onglet *Audit de Sécurité* et son résultat est conservé d'une session à l'autre.
+* **Déclenché quand vous le décidez** : le lancement de l'application se contente d'un `brew update` — l'état « mises à jour disponibles » est donc toujours exact. L'audit de vulnérabilités, lui, interroge une base distante paquet par paquet : il se lance depuis l'espace *Sécurité* et son résultat est conservé d'une session à l'autre.
 * **Audit hybride EUVD + NVD** : **EUVD** (ENISA, par produit déclaré) porte l'audit et la **NVD** (NIST, par recoupement CPE — le nom du produit et la version installée sont envoyés à NIST, qui fait lui-même le calcul de plage) le complète en parallèle, sur sa propre file, sans jamais le ralentir. Chaque faille indique la base qui l'a relevée, avec un lien cliquable vers sa page officielle. Les modes EUVD seul et NVD seul restent disponibles. Le nom Homebrew est réconcilié avec le dictionnaire CPE quand il diffère (`node` → `nodejs`).
 * **Verdict par version installée** : chaque avis est recroisé avec la version présente sur le disque. Ce que votre version corrige déjà n'apparaît pas ; les plages exprimées dans un autre schéma (dates d'instantané, empreintes de commit) sont écartées au lieu d'être prises pour des numéros de version.
 * **Priorisation par le risque réel** : les failles inscrites au catalogue **CISA KEV** (exploitation avérée sur le terrain) passent devant tout le reste, et le score **EPSS** donne la probabilité d'exploitation à trente jours. Un score CVSS élevé que personne n'exploite ne masque plus une faille moyenne activement utilisée.
-* **Trois états distincts, jamais confondus** : *sain*, *produit non répertorié par la base* et *interrogation échouée*. Un quota d'API dépassé ne s'affiche plus comme un badge vert.
+* **États distincts, jamais confondus** : *faille confirmée*, *avis à trancher*, *non concluant* (des avis sans plage de versions n'ont pas pu être tranchés), *non suivi*, *interrogation échouée* et *sain*. Une barre de couverture montre d'un coup d'œil ce que l'audit a réellement pu vérifier ; un quota d'API dépassé ne s'affiche jamais comme un badge vert.
+* **Moins d'angles morts** : un paquet dont le nom Homebrew diffère de celui des bases est aussi cherché sous son nom amont (`webp` → `libwebp`). Pour ce qui reste non suivi, la fiche signale un paquet déprécié, désactivé ou issu d'un tap tiers, et propose des liens de vérification manuelle (NVD, EUVD, OSV, avis du dépôt GitHub).
 * **Analyse parallèle** : les paquets sont interrogés de front dans la limite du quota de la base ; une clé d'API NVD (gratuite) fait passer la limite de 5 à 50 requêtes par 30 secondes.
 
 ### 3. 🔧 Plan de Remédiation par Paquet
@@ -31,12 +35,12 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 * **Casks à mise à jour automatique** : signalés comme tels, la version connue de Homebrew n'étant plus celle qui tourne.
 
 ### 4. 🛍️ Catalogue & App Store Homebrew Intégré
-* **Onglet Découvrir** : Parcourez des sélections sélectionnées par catégorie (Utilitaires de développement, Terminaux Modernes, Sécurité, Éditeurs de texte).
+* **Découvrir** : des recommandations tirées des statistiques publiques d'installation de Homebrew, actualisées chaque jour — ce qui monte en ce moment, les outils et applications les plus installés, un tirage du jour parmi des paquets moins connus — sans ce qui est déjà installé. Installation en un clic, mise en file d'attente.
 * **Recherche Mondiale Instantanée** : Tapez n'importe quel mot-clé dans la barre de recherche. L'application interroge la base globale Homebrew et vous propose l'installation en 1-clic des nouveaux outils sans quitter l'interface !
 
-### 5. ⚙️ Maintenance & Mode Silencieux
-* **Zéro interruption visuelle** : Lancez un nettoyage complet (`brew cleanup`), un diagnostic système (`brew doctor`) ou une mise à niveau générale (`brew update & upgrade`). Tout s'exécute silencieusement en arrière-plan via un bandeau de progression animé au sommet de la fenêtre.
-* **Console d'audit à la demande** : Besoin d'inspecter les détails techniques d'une installation ? Ouvrez d'un clic la console de logs en direct au format terminal macOS.
+### 5. ⚙️ Activité & Maintenance
+* **File d'attente** : chaque commande Homebrew — installation, mise à jour, nettoyage (`brew cleanup`), diagnostic (`brew doctor`) — devient une tâche qui attend son tour, sans bloquer l'interface ni entrer en concurrence avec une autre.
+* **Journal par tâche** : vue résumée étape par étape ou sortie brute du terminal, consultable après coup dans l'espace *Activité*.
 
 ---
 
@@ -56,7 +60,7 @@ Savoir qu'une faille est ouverte ne dit pas quoi en faire. Pour chaque paquet vu
 ### Option 1 : Via l'Installateur macOS (DMG)
 L'installateur publié avec chaque version contient un **binaire universel**, exécutable
 nativement sur Apple Silicon comme sur Intel :
-1. Téléchargez `BrewHelper-1.4.1-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
+1. Téléchargez `BrewHelper-1.5-Installer.dmg` depuis la [dernière version publiée](https://github.com/Arendhal/BrewHelper/releases/latest).
 2. Ouvrez-le et glissez l'icône **BrewHelper** dans votre dossier *Applications*.
 3. Lancez l'application.
 
@@ -85,8 +89,9 @@ lipo -archs build/Build/Products/Release/BrewHelper.app/Contents/MacOS/BrewHelpe
 ## 🏗️ Architecture Technique
 
 * **`AppState.swift`** : Chef d'orchestre de l'interface graphique et gestionnaire asynchrone des tâches d'arrière-plan.
+* **`ActivityCenter.swift`** : File sérielle des commandes Homebrew et journal de chaque tâche.
 * **`BrewCommandService.swift`** : Pont de communication sécurisé exécutant les processus natifs macOS (`Process`, `Pipe`) avec lecture de flux d'entrées/sorties en continu.
-* **`BrewCatalogService.swift`** : Catalogue de recommandations et moteur de recherche global connectant l'App Store Homebrew en JSON v2.
+* **`BrewCatalogService.swift`** : Recommandations calculées à partir des statistiques d'installation de Homebrew (`formulae.brew.sh/api/analytics`) et moteur de recherche global.
 * **`CVESecurityService.swift`** : Orchestration de l'audit — une file par base (EUVD en première ligne, NVD en renfort), recoupement des verdicts, temporisation par quota, reprises sur échec, cache disque et distinction sain / non répertorié / échec.
 * **`ProductIdentity.swift`** : Vérification d'identité des avis — nom, éditeur, plateforme visée, schéma de version et références, avec un score et des raisons affichables. `Tools/check-identity.sh` en rejoue les cas de régression hors ligne.
 * **`VulnerabilityMatcher.swift`** : Comparaison de versions et interprétation des plages affectées (CPE structuré côté NVD, texte libre côté EUVD), correspondance produit/paquet.
